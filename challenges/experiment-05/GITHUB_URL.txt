@@ -1,0 +1,4 @@
+https://github.com/<your-account>/<your-repo>/tree/main/submission
+
+# 待填写：本行请替换为你实际公开仓库中本作品的链接（未登录 GitHub 可打开）。
+# 第二行可写本提交目录内的相对文件路径，例如：submission/SKILL.md

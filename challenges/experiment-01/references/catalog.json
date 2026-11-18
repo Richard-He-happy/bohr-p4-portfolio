@@ -1,0 +1,758 @@
+{
+ "_meta": {
+  "file": "references/catalog.json",
+  "role": "Reusable knowledge base for experiment-plan-builder: unit vocabulary, display labels, table headers, control templates, risk catalog, anomaly playbook, acceptance criteria.",
+  "version": "1.0.0",
+  "note": "Pure data, editable without touching code. The engine never invents numbers here: every number in a generated plan comes from the case input or is explicitly marked convention/missing.",
+  "keys": "groups[] -> role,level,excludes,basis_type; risks[] -> code,failure_mode,likelihood,impact,early_signal,mitigation,stop_condition,fallback"
+ },
+ "units": {
+  "duration": {
+   "s": 0.0166667,
+   "sec": 0.0166667,
+   "secs": 0.0166667,
+   "second": 0.0166667,
+   "seconds": 0.0166667,
+   "秒": 0.0166667,
+   "m": 1,
+   "min": 1,
+   "mins": 1,
+   "minute": 1,
+   "minutes": 1,
+   "分": 1,
+   "分钟": 1,
+   "h": 60,
+   "hr": 60,
+   "hrs": 60,
+   "hour": 60,
+   "hours": 60,
+   "小时": 60,
+   "d": 1440,
+   "day": 1440,
+   "days": 1440,
+   "天": 1440,
+   "wk": 10080,
+   "wks": 10080,
+   "week": 10080,
+   "weeks": 10080,
+   "周": 10080
+  },
+  "currency": [
+   [
+    "¥",
+    "CNY"
+   ],
+   [
+    "￥",
+    "CNY"
+   ],
+   [
+    "rmb",
+    "CNY"
+   ],
+   [
+    "cny",
+    "CNY"
+   ],
+   [
+    "yuan",
+    "CNY"
+   ],
+   [
+    "元",
+    "CNY"
+   ],
+   [
+    "$",
+    "USD"
+   ],
+   [
+    "usd",
+    "USD"
+   ],
+   [
+    "€",
+    "EUR"
+   ],
+   [
+    "eur",
+    "EUR"
+   ],
+   [
+    "£",
+    "GBP"
+   ],
+   [
+    "gbp",
+    "GBP"
+   ]
+  ],
+  "convert": {
+   "ul": [
+    0.001,
+    "v"
+   ],
+   "ml": [
+    1.0,
+    "v"
+   ],
+   "l": [
+    1000.0,
+    "v"
+   ],
+   "ug": [
+    0.001,
+    "m"
+   ],
+   "mg": [
+    1.0,
+    "m"
+   ],
+   "g": [
+    1000.0,
+    "m"
+   ],
+   "kg": [
+    1000000.0,
+    "m"
+   ],
+   "ea": [
+    1.0,
+    "c"
+   ],
+   "each": [
+    1.0,
+    "c"
+   ],
+   "个": [
+    1.0,
+    "c"
+   ],
+   "支": [
+    1.0,
+    "c"
+   ],
+   "管": [
+    1.0,
+    "c"
+   ],
+   "片": [
+    1.0,
+    "c"
+   ],
+   "次": [
+    1.0,
+    "c"
+   ],
+   "well": [
+    1.0,
+    "c"
+   ],
+   "孔": [
+    1.0,
+    "c"
+   ]
+  }
+ },
+ "labels": {
+  "title_suffix": "可执行实验方案",
+  "ver": "方案版本",
+  "derived": "派生自",
+  "mode": "模式",
+  "goal": "研究目标",
+  "gen_at": "生成时间",
+  "goal_missing": "（输入未给出，见第 13 节确认项）",
+  "t1": "假设与判据",
+  "t2": "变量与操作定义",
+  "t3": "分组与对照",
+  "t4": "试剂与耗材",
+  "t5": "仪器与量程",
+  "t6": "参数表",
+  "t7": "步骤",
+  "t8": "排期",
+  "t9": "成本",
+  "t10": "判读标准与停止条件",
+  "t11": "风险与异常",
+  "t12": "可行性台账",
+  "t13": "确认项",
+  "t14": "证据与来源",
+  "t15": "版本与变更",
+  "t16": "复现",
+  "s_n": "样本量：每组 n={n}，合计 {tot}。依据：{b}",
+  "wall": "墙钟时间：**{h} h**（{u} 个步骤未给时长，该值为下界）",
+  "person": "人工工时：{h} h",
+  "win": "时间窗：{w}",
+  "concl": "结论：**{v}**",
+  "pend": "{i}. [{f}] {item} — {why}；动作：{act}",
+  "blocking": "阻塞",
+  "none": "（无）",
+  "chg": "- {id} `{op}` {field}：{before} → {after}（{rule}）",
+  "nochg": "- 无变更（所选候选已满足全部硬约束）",
+  "evl": "- `{cid}` {claim} — {loc} → `{q}`",
+  "anom": "{i}. **{s}** → 原因：{c}；动作：{a}；升级：{e}",
+  "gantt_none": "(步骤时长未给出，无法排期——见确认项)",
+  "sel_from": "- 选中候选：{s} → 终版 {v}",
+  "repro": "python3 -B scripts/build_plan.py --input /input --output /app/output",
+  "repro2": "python3 -B scripts/build_plan.py --help",
+  "in_range": "在量程内",
+  "out_range": "超量程",
+  "in_dom": "在允许域内",
+  "no_dom": "无可对照域",
+  "book_ok": "可排期",
+  "book_short": "机时不足",
+  "book_unknown": "机时未知（需预约确认）",
+  "unused": "未使用",
+  "pass": "通过",
+  "fail": "未通过",
+  "checked": "已校验",
+  "not_given": "输入未给出",
+  "crit1": "主指标 {dv} 在 {iv} 各水平间的差异方向与假设一致，以双侧 α=0.05 检验判定（α 为惯例值，待确认）",
+  "hyps": "操纵 {iv} 会以可测量且方向一致的方式改变 {dv}",
+  "hyp0": "{iv} 各水平间 {dv} 无差异",
+  "hyprule": "组间差异经双侧 α=0.05 检验判定且阳性对照有效（α 为惯例，见确认项）",
+  "hypfalse": "阳性对照有效的前提下各水平间差异不显著（效应低于当前 n 可检出水平）",
+  "iv_op": "由操作者按方案设定的水平",
+  "dv_op": "按第 7 节步骤在指定设备上采集的原始读数",
+  "ctl_name": "操作者、试剂批号、环境温度",
+  "ctl_op": "全程固定并写入运行日志",
+  "conf_name": "孔板/批次位置效应",
+  "conf_op": "随机化加样顺序并记录位置",
+  "iv_tbd": "待确认的自变量",
+  "dv_tbd": "待确认的主要读出指标",
+  "gap_iv": "输入无 factor/level/domain 字段",
+  "gap_dv": "输入无 readout/endpoint/assay 字段",
+  "act_iv": "从 task.md 指定操纵因素并给出水平",
+  "act_dv": "指定主读出指标、测量设备与单位",
+  "step_out": "原始读数与操作日志",
+  "headline": "以 {sel} 为基础修订出 {nc} 处改动、六类要素齐全的可执行方案；预估 {cost} {cur}、{h} h、{tn} 个样本",
+  "owner": "实验负责人",
+  "no_case_note": "无可用 case.json，仅输出结构骨架",
+  "partial_pre": "分析开始前先落盘的 partial 结果",
+  "skeleton": "仅骨架",
+  "rerun": "重新运行",
+  "build_abort": "流程中断",
+  "only_skeleton": "仅交付 partial 骨架",
+  "no_case_file": "输入目录下没有可解析的 JSON 案例文件",
+  "revise_nofallback": "要求 revise 但输入无候选方案",
+  "degraded_gen": "退化为单方案生成",
+  "unmapped": "契约字段未映射：",
+  "no_target": "无对应规范字段",
+  "null_shape": "按契约形态置 null",
+  "gap_struct": "该要素只能给出结构性建议",
+  "not_costed": "该行成本未计入合计",
+  "fill_units": "补齐计价单位与换算",
+  "dur_item": "步骤时长",
+  "dur_why": "{n} 个步骤无时长",
+  "dur_eff": "排期为下界",
+  "dur_fix": "预实验测时或查设备手册",
+  "criterion": "先比硬约束违背数，再比成本与墙钟时间",
+  "gen_step": "按输入材料规格准备样品与试剂",
+  "no_modality": "未提供可用方案，等待人工补录",
+  "stage_sum": "阶段合计 {h} h（并行阶段按最长步骤计）",
+  "sec_sched": "排期与成本/schedule & cost",
+  "sec_acc": "判读、可行性与确认项/acceptance",
+  "sec_risk": "风险与异常/risks",
+  "sec_ev": "证据、变更与复现/evidence & changes",
+  "costline": "成本核算：{c}",
+  "gold": "金标准"
+ },
+ "th": {
+  "hyp": [
+   "ID",
+   "假设",
+   "零假设",
+   "判据",
+   "依据"
+  ],
+  "var": [
+   "角色",
+   "变量",
+   "操作定义/测量",
+   "单位",
+   "水平或范围",
+   "依据"
+  ],
+  "grp": [
+   "ID",
+   "角色",
+   "水平",
+   "n",
+   "排除的混杂"
+  ],
+  "mat": [
+   "ID",
+   "名称",
+   "规格",
+   "需求",
+   "单价",
+   "小计",
+   "库存",
+   "替代"
+  ],
+  "eqp": [
+   "ID",
+   "仪器",
+   "型号",
+   "量程",
+   "精度",
+   "机时费",
+   "需用机时",
+   "可用机时",
+   "结论"
+  ],
+  "prm": [
+   "参数",
+   "取值",
+   "单位",
+   "允许域",
+   "设备量程",
+   "结论",
+   "依据"
+  ],
+  "stp": [
+   "ID",
+   "步骤",
+   "阶段",
+   "时长(min)",
+   "设备",
+   "试剂",
+   "关键参数"
+  ],
+  "cost": [
+   "项目",
+   "金额"
+  ],
+  "risk": [
+   "ID",
+   "失败模式",
+   "早期信号",
+   "处置",
+   "止损",
+   "替代路径"
+  ],
+  "feas": [
+   "硬约束",
+   "状态",
+   "证据"
+  ],
+  "sched": [
+   "ID",
+   "阶段",
+   "开始(min)",
+   "结束(min)"
+  ]
+ },
+ "cost_rows": {
+  "material": "试剂耗材",
+  "equipment": "机时",
+  "total": "合计",
+  "budget": "预算上限"
+ },
+ "groups": [
+  {
+   "role": "treatment",
+   "level": "处理组（自变量各水平）",
+   "excludes": "—",
+   "basis_type": "sample_size"
+  },
+  {
+   "role": "blank",
+   "level": "空白/溶剂对照",
+   "excludes": "溶剂、基质与操作带来的非特异效应",
+   "basis_type": "principle"
+  },
+  {
+   "role": "negative",
+   "level": "阴性对照（不含目标物/未处理）",
+   "excludes": "仪器本底造成的假阳性",
+   "basis_type": "principle"
+  },
+  {
+   "role": "positive",
+   "level": "阳性对照（已知响应参照物）",
+   "excludes": "检测体系失敏造成的假阴性",
+   "basis_type": "principle"
+  }
+ ],
+ "risks": [
+  {
+   "code": "R-SIGNAL",
+   "failure_mode": "无信号或低于检出限",
+   "likelihood": "medium",
+   "impact": "high",
+   "early_signal": "空白与处理组读数无差异，且低于设备量程下限",
+   "mitigation": "先跑阳性对照确认体系，再提高上样量或延长采集时间",
+   "stop_condition": "阳性对照仍无响应则停止该批",
+   "fallback": "改用更高灵敏度读出方式或替代设备"
+  },
+  {
+   "code": "R-SAT",
+   "failure_mode": "信号饱和/超量程",
+   "likelihood": "medium",
+   "impact": "medium",
+   "early_signal": "读数贴近设备量程上限",
+   "mitigation": "按量程上限预稀释或缩短采集时间",
+   "stop_condition": "连续两个样本饱和即停止并按预实验重新定标",
+   "fallback": "降低浓度或改用宽量程设备"
+  },
+  {
+   "code": "R-REPRO",
+   "failure_mode": "重复性差/批次漂移",
+   "likelihood": "medium",
+   "impact": "high",
+   "early_signal": "同组重复间离散度随时间增大",
+   "mitigation": "每批插入同一质控样本，固定操作者与试剂批号",
+   "stop_condition": "质控样本超出预设区间即整批重做",
+   "fallback": "分批复测并登记批号"
+  },
+  {
+   "code": "R-CONTAM",
+   "failure_mode": "污染或交叉污染",
+   "likelihood": "low",
+   "impact": "high",
+   "early_signal": "空白组出现预期外的强信号",
+   "mitigation": "分区操作、每步更换枪头、加设环境空白",
+   "stop_condition": "空白受污染则该批数据作废",
+   "fallback": "重做并加设环境空白"
+  },
+  {
+   "code": "R-STOCK",
+   "failure_mode": "试剂缺货或到货延迟",
+   "likelihood": "medium",
+   "impact": "medium",
+   "early_signal": "库存低于单批需求",
+   "mitigation": "下单前核对库存与货期，登记已验证替代品",
+   "stop_condition": "替代品未验证不得替换关键试剂",
+   "fallback": "换用输入给出的替代试剂或缩小样本量"
+  },
+  {
+   "code": "R-QUEUE",
+   "failure_mode": "设备排期不足或故障",
+   "likelihood": "medium",
+   "impact": "high",
+   "early_signal": "所需机时超过可用机时",
+   "mitigation": "提前预约并落实替代设备",
+   "stop_condition": "排期不足且无替代则推迟，不压缩重复",
+   "fallback": "切换到替代设备并记录参数换算"
+  }
+ ],
+ "risks_cond": {
+  "R-TIME": {
+   "code": "R-TIME",
+   "failure_mode": "进度落后于时间窗",
+   "likelihood": "high",
+   "impact": "high",
+   "early_signal": "已耗时超过时间窗的 80%",
+   "mitigation": "关键路径步骤优先排期，非关键步骤并行",
+   "stop_condition": "剩余窗口不足一轮复测则降级为单批",
+   "fallback": "删减次要读出指标，保留主指标"
+  },
+  "R-COST": {
+   "code": "R-COST",
+   "failure_mode": "成本超预算",
+   "likelihood": "high",
+   "impact": "medium",
+   "early_signal": "累计成本超过预算的 80%",
+   "mitigation": "优先使用已有库存与同规格低价项",
+   "stop_condition": "预算耗尽即停止新增批次",
+   "fallback": "按允许域下调样本量至最小可行 n"
+  }
+ },
+ "anomaly": [
+  {
+   "s": "无信号/全平",
+   "c": "体系失敏、试剂失效或样品未加载",
+   "a": "先查阳性对照与加载记录",
+   "e": "阳性对照正常则查样品，异常则换新批试剂"
+  },
+  {
+   "s": "信号饱和",
+   "c": "浓度过高或采集时间过长",
+   "a": "稀释复测并核对量程",
+   "e": "仍饱和则改用低量程档"
+  },
+  {
+   "s": "重复间离散大",
+   "c": "操作者/批次/温度漂移",
+   "a": "插入质控样本并核对设备预热",
+   "e": "离散超阈则整批重做并固定单操作者"
+  },
+  {
+   "s": "空白组出现强信号",
+   "c": "污染或交叉污染",
+   "a": "更换耗材并加设环境空白",
+   "e": "污染未除则作废重做"
+  },
+  {
+   "s": "样本量不足",
+   "c": "样本损耗或分组过多",
+   "a": "按最小可行 n 合并次要分组",
+   "e": "低于最小 n 则补样或缩小目标"
+  }
+ ],
+ "criteria": [
+  {
+   "id": "C1",
+   "basis_type": "convention",
+   "t": "crit1"
+  },
+  {
+   "id": "C2",
+   "basis_type": "principle",
+   "t": "阳性对照出现预期响应、空白与阴性对照无预期响应，否则该批数据不判读"
+  },
+  {
+   "id": "C3",
+   "basis_type": "principle",
+   "t": "同组重复的离散度落在预实验设定的质控区间内（区间需由预实验确定）"
+  }
+ ],
+ "std": {
+  "gold_missing": "输入未提供金标准；建议以本轮阳性对照与历史批次的同一质控样本作为比对基准",
+  "gold_input": "输入提供了既有结果或金标准字段，以其作为比对基准",
+  "n_convention": "输入无样本量/效应量，采用最小可行重复 n=3（领域惯例，非输入数据）",
+  "n_input": "输入给定的每组 n"
+ },
+ "gaps": {
+  "n": {
+   "item": "样本量",
+   "why": "输入无 n、效应量或标准差",
+   "blocking": false,
+   "action": "先做预实验估计 σ 与 Δ，再按样本量公式重算"
+  },
+  "unpriced": {
+   "item": "计价缺项",
+   "why": "该材料缺单价、用量或单位不可换算",
+   "blocking": false,
+   "action": "补齐单价与计价单位，或换用同规格项"
+  },
+  "booking": {
+   "item": "排期",
+   "why": "设备契约缺可用机时",
+   "blocking": true,
+   "action": "向设备管理员确认可预约机时后再排期"
+  },
+  "budget": {
+   "item": "预算",
+   "why": "输入无预算字段",
+   "blocking": false,
+   "action": "确认预算上限后再决定是否削减重复"
+  },
+  "window": {
+   "item": "时间窗",
+   "why": "输入无截止时间字段",
+   "blocking": false,
+   "action": "确认截止时间后校核排期"
+  },
+  "duration": {
+   "item": "步骤时长",
+   "why": "所选方案步骤没有时长字段",
+   "blocking": true,
+   "action": "用预实验或设备手册补齐每步时长后再排期"
+  },
+  "steps": {
+   "item": "步骤流程",
+   "why": "输入未给出候选方案的步骤、时长与参数",
+   "blocking": true,
+   "action": "依据 task.md 与材料补写步骤、时长与关键参数"
+  }
+ },
+ "report": [
+  {
+   "sec": "t1",
+   "th": "hyp",
+   "src": "hypotheses",
+   "cols": [
+    "id",
+    "statement",
+    "null",
+    "decision_rule",
+    "basis_type"
+   ]
+  },
+  {
+   "sec": "t2",
+   "th": "var",
+   "src": "variables",
+   "cols": [
+    "role",
+    "name",
+    "operational",
+    "levels",
+    "basis_type"
+   ]
+  },
+  {
+   "sec": "t3",
+   "th": "grp",
+   "src": "groups",
+   "cols": [
+    "id",
+    "role",
+    "level",
+    "n",
+    "excludes"
+   ]
+  },
+  {
+   "sec": "t4",
+   "th": "mat",
+   "src": "materials",
+   "cols": [
+    "id",
+    "name",
+    "spec",
+    "need",
+    "unit_price",
+    "cost",
+    "stock",
+    "substitute"
+   ]
+  },
+  {
+   "sec": "t5",
+   "th": "eqp",
+   "src": "equipment",
+   "cols": [
+    "id",
+    "name",
+    "model",
+    "range",
+    "prec",
+    "rate",
+    "need_h",
+    "available_h",
+    "verdict"
+   ]
+  },
+  {
+   "sec": "t7",
+   "th": "stp",
+   "src": "steps",
+   "cols": [
+    "id",
+    "act",
+    "stage",
+    "min",
+    "eq",
+    "rg",
+    "params_txt"
+   ]
+  }
+ ],
+ "contract_map": [
+  [
+   "case_id",
+   "case_?id|任务"
+  ],
+  [
+   "summary",
+   "summary|摘要|概览"
+  ],
+  [
+   "hypotheses",
+   "hypothes|假设"
+  ],
+  [
+   "variables",
+   "variable|变量"
+  ],
+  [
+   "groups",
+   "group|arm|分组|对照|control"
+  ],
+  [
+   "sample_size",
+   "sample|样本|重复"
+  ],
+  [
+   "materials",
+   "material|reagent|consum|材料|试剂|耗材"
+  ],
+  [
+   "equipment",
+   "equip|instrument|device|仪器|设备"
+  ],
+  [
+   "steps",
+   "step|procedure|protocol|步骤|操作|流程"
+  ],
+  [
+   "parameters",
+   "param|参数|设定"
+  ],
+  [
+   "schedule",
+   "cost|budget|预算|成本|费用|schedul|timeline|时间|排期|工期"
+  ],
+  [
+   "risks",
+   "risk|风险"
+  ],
+  [
+   "validation",
+   "valid|criteria|判据|判读|验证"
+  ],
+  [
+   "feasibility",
+   "feasib|可行"
+  ],
+  [
+   "comparison",
+   "compar|比较|对比|选型"
+  ],
+  [
+   "anomaly",
+   "anomal|异常|故障"
+  ],
+  [
+   "evidence",
+   "evidence|source|依据|来源|quote"
+  ],
+  [
+   "uncertainty",
+   "uncertain|不确定|置信|confidence"
+  ],
+  [
+   "pending_human",
+   "pending|confirm|确认|人工"
+  ],
+  [
+   "status",
+   "status|状态"
+  ],
+  [
+   "coverage",
+   "coverage|覆盖"
+  ],
+  [
+   "changes",
+   "change|变更|版本"
+  ],
+  [
+   "degradations",
+   "degrad|降级"
+  ],
+  [
+   "errors",
+   "error|错误"
+  ],
+  [
+   "plan",
+   "plan|方案|protocol_?file|产物"
+  ]
+ ],
+ "risk_cols": [
+  "id",
+  "code",
+  "failure_mode",
+  "likelihood",
+  "impact",
+  "early_signal",
+  "mitigation",
+  "stop_condition",
+  "fallback",
+  "owner",
+  "source_ref"
+ ]
+}
