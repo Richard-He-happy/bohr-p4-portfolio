@@ -1,0 +1,12 @@
+2026-11-13T16:56:05Z  INFO  init materials=2 corpus_blocks=2 contract=case_id,status,editable_source,export_artifact,content_map,compliance_checks,exceptions
+2026-11-13T16:56:05Z  INFO  check clean=True rejected=0 issues=0 missing_elements=0 missing_relations=0
+2026-11-13T16:56:05Z  INFO  build start argv=build --input /input --output /app/output --work /app/work
+2026-11-13T16:56:05Z  INFO  partial result.json written before render
+2026-11-13T16:56:05Z  INFO  indexed materials=2 corpus_blocks=2
+2026-11-13T16:56:05Z  INFO  plan loaded from /app/work/plan.json
+2026-11-13T16:56:05Z  INFO  validate entities=3 relations=2 verified=5 rejected=0
+2026-11-13T16:56:05Z  INFO  rendered figure.svg=5113B figure.pdf=1759B entities=3 relations=2 types=binding,activation
+2026-11-13T16:56:06Z  INFO  golden entities=3 relations=2 rules=9 quotes=19/19
+2026-11-13T16:56:06Z  INFO  diff verdict=达标 deviations=0 missing=0 coverage=100.0%
+2026-11-13T16:56:06Z  INFO  self_check all_pass=True failures=none
+2026-11-13T16:56:06Z  DONE  build 1.07s status=ok assets=9

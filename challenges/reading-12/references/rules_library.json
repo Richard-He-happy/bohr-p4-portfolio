@@ -1,0 +1,566 @@
+{
+  "version": "1.0.0",
+  "precedence": "Lower priority number wins. Case-supplied rules default to priority 10, builtin rules use 100+. When two rules target the same (applies_to, condition) the higher-precedence transform runs and the suppressed rule is listed in result.suppressed_rules.",
+  "rules": [
+    {
+      "rule_id": "R001",
+      "name": "row_identity_preserve",
+      "priority": 101,
+      "applies_to": "row_id",
+      "condition": "a row identifier column exists",
+      "transform": "keep value verbatim as string; never renumber rows",
+      "examples": [
+        "R0007 stays R0007"
+      ],
+      "failure_mode": "renumbering breaks traceability",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R002",
+      "name": "row_identity_derive",
+      "priority": 102,
+      "applies_to": "row_id",
+      "condition": "no row identifier column, or a blank value",
+      "transform": "generate derived-<n> and log a degradation",
+      "examples": [
+        "derived-12"
+      ],
+      "failure_mode": "derived ids are not original identities and must be reported",
+      "human_gate": true
+    },
+    {
+      "rule_id": "R003",
+      "name": "field_map_synonym",
+      "priority": 103,
+      "applies_to": "column",
+      "condition": "original column name matches a synonym or a schema field",
+      "transform": "map column to target field name, record mapping basis",
+      "examples": [
+        "measured value -> value"
+      ],
+      "failure_mode": "guessing a mapping without a synonym hit",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R004",
+      "name": "header_unit_extract",
+      "priority": 104,
+      "applies_to": "column",
+      "condition": "unit is embedded in the column header",
+      "transform": "split header into indicator text plus unit; unit becomes the row unit when the unit column is empty",
+      "examples": [
+        "band gap (eV) -> indicator 'band gap', unit 'eV'"
+      ],
+      "failure_mode": "leaving 'eV' inside the indicator name",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R005",
+      "name": "wide_table_melt",
+      "priority": 105,
+      "applies_to": "table",
+      "condition": "no value column but several measured columns",
+      "transform": "melt measured columns into long rows, row_id becomes <row_id>@<column slug>",
+      "examples": [
+        "one paper row with 5 measured columns -> 5 rows"
+      ],
+      "failure_mode": "keeping wide format blocks unit handling",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R006",
+      "name": "missing_preserve",
+      "priority": 106,
+      "applies_to": "value",
+      "condition": "cell is blank or a missing token (n.r., n.d., -, NA, not reported)",
+      "transform": "value stays null, value_text keeps the original token, status=missing; never write 0",
+      "examples": [
+        "n.r. -> null"
+      ],
+      "failure_mode": "missing coerced to zero pollutes statistics",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R007",
+      "name": "range_split",
+      "priority": 107,
+      "applies_to": "value",
+      "condition": "cell holds a range such as 12-15 or 1.2-1.5",
+      "transform": "value_low and value_high converted independently; value stays null; no midpoint",
+      "examples": [
+        "12-15 mg/L -> 12 and 15 mg/L"
+      ],
+      "failure_mode": "collapsing a range to a midpoint invents a measurement",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R008",
+      "name": "error_term_keep",
+      "priority": 108,
+      "applies_to": "value",
+      "condition": "cell holds value +/- error",
+      "transform": "value and err stored separately, both converted with the same factor",
+      "examples": [
+        "12 +/- 0.5 -> value 12, err 0.5"
+      ],
+      "failure_mode": "dropping the error term",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R009",
+      "name": "unit_convert_affine",
+      "priority": 109,
+      "applies_to": "unit",
+      "condition": "source unit and canonical unit share a dimension signature",
+      "transform": "after = before * factor + offset; change log records factor, offset and the written formula",
+      "examples": [
+        "1.2 mg/L -> 1.2 mg/L (factor 1)",
+        "25 C -> 298.15 K (factor 1, offset 273.15)"
+      ],
+      "failure_mode": "converting across a dimension mismatch",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R010",
+      "name": "unit_unknown_hold",
+      "priority": 110,
+      "applies_to": "unit",
+      "condition": "unit token is a.u./arb./unknown, unparsable, or a dimension mismatch",
+      "transform": "no conversion, cleaned value stays null, status=needs_review, entry in pending_review",
+      "examples": [
+        "a.u. -> null + pending"
+      ],
+      "failure_mode": "guessing a unit or substituting zero",
+      "human_gate": true
+    },
+    {
+      "rule_id": "R011",
+      "name": "unit_missing_hold",
+      "priority": 111,
+      "applies_to": "unit",
+      "condition": "value present but unit cell empty",
+      "transform": "keep value and null unit, status=needs_review, pending_review reason missing_unit",
+      "examples": [
+        "12 with no unit"
+      ],
+      "failure_mode": "assuming the canonical unit",
+      "human_gate": true
+    },
+    {
+      "rule_id": "R012",
+      "name": "synonym_normalize",
+      "priority": 112,
+      "applies_to": "name",
+      "condition": "material or indicator text has a known synonym or a formula spelling variant",
+      "transform": "map to the normalized label, keep original text in original_value/original_name",
+      "examples": [
+        "titanium dioxide -> TiO2",
+        "TiO2 -> TiO2"
+      ],
+      "failure_mode": "over-normalizing two different substances into one label",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R013",
+      "name": "dedup_key_exact",
+      "priority": 113,
+      "applies_to": "table",
+      "condition": "two rows share judgment key and identical normalized value+unit",
+      "transform": "merge into the lowest row_id, other row status=merged_duplicate with duplicate_of",
+      "examples": [
+        "same source, same condition, same 3.2 eV twice -> one row"
+      ],
+      "failure_mode": "merging across different sources or conditions",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R014",
+      "name": "dedup_keep_replicates",
+      "priority": 114,
+      "applies_to": "table",
+      "condition": "two rows share judgment key but different values within tolerance",
+      "transform": "keep both rows, later one status=replicate, action keep_separate with reason",
+      "examples": [
+        "repeat measurement 3.20 and 3.23 eV"
+      ],
+      "failure_mode": "averaging replicates and losing n",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R015",
+      "name": "source_conflict_flag",
+      "priority": 115,
+      "applies_to": "table",
+      "condition": "same judgment key, values differ beyond tolerance",
+      "transform": "keep both original values, add source_conflict to pending_review; conversion must not be used to explain the difference away",
+      "examples": [
+        "same source+condition 3.2 eV vs 2.1 eV"
+      ],
+      "failure_mode": "rescaling one value to force agreement",
+      "human_gate": true
+    },
+    {
+      "rule_id": "R016",
+      "name": "value_bounds_check",
+      "priority": 116,
+      "applies_to": "value",
+      "condition": "a schema or rule supplies an allowed range for the indicator",
+      "transform": "out-of-range values kept but status=needs_review with reason out_of_range",
+      "examples": [
+        "band gap 25 eV for an oxide"
+      ],
+      "failure_mode": "silently deleting outliers",
+      "human_gate": true
+    },
+    {
+      "rule_id": "R017",
+      "name": "precision_record",
+      "priority": 117,
+      "applies_to": "value",
+      "condition": "always",
+      "transform": "record source decimal places in change log precision field; converted value printed to 6 significant digits",
+      "examples": [
+        "1.20 -> precision d=2"
+      ],
+      "failure_mode": "presenting converted digits as if measured",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R018",
+      "name": "status_assign",
+      "priority": 118,
+      "applies_to": "row",
+      "condition": "always",
+      "transform": "status in ok|needs_review|missing|replicate|merged_duplicate|conflict",
+      "examples": [
+        "ok"
+      ],
+      "failure_mode": "one status for everything",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R019",
+      "name": "encoding_recover",
+      "priority": 119,
+      "applies_to": "table",
+      "condition": "file fails strict utf-8",
+      "transform": "retry utf-8-sig, gb18030, latin-1; record degradation and count replacement characters",
+      "examples": [
+        "GBK csv reads cleanly"
+      ],
+      "failure_mode": "crashing on a non-utf8 export",
+      "human_gate": false
+    },
+    {
+      "rule_id": "R020",
+      "name": "empty_table_hold",
+      "priority": 120,
+      "applies_to": "table",
+      "condition": "records file exists but has zero data rows",
+      "transform": "status=insufficient_evidence, keep contract fields, list the gap",
+      "examples": [
+        "header-only csv"
+      ],
+      "failure_mode": "reporting a successful clean of nothing",
+      "human_gate": true
+    }
+  ],
+  "judgment_key": {
+    "template": "source_document_id|condition_key|indicator_norm|material_norm",
+    "notes": "Rows that differ in source or in any condition column never share a judgment key, so different experiments are never merged.",
+    "conflict_relative_tolerance": 0.05,
+    "replicate_relative_tolerance": 0.05
+  },
+  "field_roles": {
+    "row_id": [
+      "row_id",
+      "rowid",
+      "row",
+      "row_no",
+      "record_id",
+      "recordid",
+      "record",
+      "uid",
+      "extraction_id",
+      "entry_id",
+      "id",
+      "序号",
+      "行号"
+    ],
+    "source_document_id": [
+      "source_document_id",
+      "source_id",
+      "doc_id",
+      "document_id",
+      "paper_id",
+      "publication_id",
+      "doi",
+      "source",
+      "文献",
+      "来源"
+    ],
+    "source_locator": [
+      "source_locator",
+      "locator",
+      "location",
+      "page",
+      "pages",
+      "page_no",
+      "table_id",
+      "figure_id",
+      "fig",
+      "table",
+      "section",
+      "页码",
+      "位置",
+      "表格"
+    ],
+    "indicator": [
+      "indicator",
+      "field",
+      "field_name",
+      "metric",
+      "variable",
+      "parameter",
+      "property",
+      "quantity",
+      "measure",
+      "measurement_type",
+      "item",
+      "指标",
+      "测量项",
+      "字段"
+    ],
+    "value": [
+      "value",
+      "raw_value",
+      "value_raw",
+      "measured_value",
+      "measurement",
+      "val",
+      "mean",
+      "result",
+      "数值",
+      "值"
+    ],
+    "unit": [
+      "unit",
+      "units",
+      "raw_unit",
+      "unit_raw",
+      "uom",
+      "单位"
+    ],
+    "material": [
+      "material",
+      "substance",
+      "sample",
+      "compound",
+      "material_name",
+      "sample_name",
+      "phase",
+      "材料",
+      "物质",
+      "样品"
+    ]
+  },
+  "condition_hints": [
+    "condition",
+    "conditions",
+    "temperature",
+    "temp",
+    "time",
+    "duration",
+    "pressure",
+    "ph",
+    "solvent",
+    "atmosphere",
+    "light",
+    "wavelength",
+    "power",
+    "current",
+    "voltage",
+    "dose",
+    "concentration",
+    "catalyst",
+    "loading",
+    "条件",
+    "温度",
+    "时间",
+    "压力",
+    "溶剂"
+  ],
+  "non_data_columns": [
+    "note",
+    "notes",
+    "comment",
+    "comments",
+    "remark",
+    "remarks",
+    "memo",
+    "flag",
+    "备注",
+    "说明"
+  ],
+  "target_schema": {
+    "version": "1.0.0",
+    "fields": {
+      "row_id": {
+        "type": "string",
+        "required": true,
+        "note": "original identity, never renumbered"
+      },
+      "source_document_id": {
+        "type": "string",
+        "required": true
+      },
+      "source_locator": {
+        "type": "string",
+        "required": false
+      },
+      "indicator": {
+        "type": "string",
+        "required": true,
+        "note": "normalized indicator label"
+      },
+      "material": {
+        "type": "string",
+        "required": false,
+        "note": "normalized material label"
+      },
+      "condition_summary": {
+        "type": "string",
+        "required": false,
+        "note": "canonical k=v; k=v text built from condition columns"
+      },
+      "value": {
+        "type": "number",
+        "required": false,
+        "note": "null for missing, range, error-only or needs_review rows"
+      },
+      "value_low": {
+        "type": "number",
+        "required": false
+      },
+      "value_high": {
+        "type": "number",
+        "required": false
+      },
+      "value_err": {
+        "type": "number",
+        "required": false
+      },
+      "value_text": {
+        "type": "string",
+        "required": false,
+        "note": "parse-normalized text of the source cell"
+      },
+      "unit": {
+        "type": "string",
+        "required": false,
+        "note": "canonical unit, empty when unconvertible"
+      },
+      "original_field": {
+        "type": "string",
+        "required": true
+      },
+      "original_value": {
+        "type": "string",
+        "required": true,
+        "note": "verbatim source cell"
+      },
+      "original_unit": {
+        "type": "string",
+        "required": false,
+        "note": "verbatim source unit"
+      },
+      "rule_ids": {
+        "type": "string",
+        "required": true,
+        "note": "semicolon separated rule ids applied to this row"
+      },
+      "judgment_key": {
+        "type": "string",
+        "required": true
+      },
+      "status": {
+        "type": "string",
+        "required": true,
+        "allowed": [
+          "ok",
+          "needs_review",
+          "missing",
+          "replicate",
+          "merged_duplicate",
+          "conflict"
+        ]
+      }
+    }
+  },
+  "material_synonyms": {
+    "titanium dioxide": "TiO2",
+    "tio2": "TiO2",
+    "titania": "TiO2",
+    "zinc oxide": "ZnO",
+    "zno": "ZnO",
+    "silicon dioxide": "SiO2",
+    "sio2": "SiO2",
+    "silica": "SiO2",
+    "aluminum oxide": "Al2O3",
+    "aluminium oxide": "Al2O3",
+    "al2o3": "Al2O3",
+    "graphitic carbon nitride": "g-C3N4",
+    "g-c3n4": "g-C3N4",
+    "methylene blue": "MB",
+    "methyl orange": "MO",
+    "rhodamine b": "RhB"
+  },
+  "indicator_synonyms": {
+    "band gap": "band_gap",
+    "bandgap": "band_gap",
+    "optical band gap": "band_gap",
+    "eg": "band_gap",
+    "e g": "band_gap",
+    "specific surface area": "bet_surface_area",
+    "bet surface area": "bet_surface_area",
+    "surface area": "bet_surface_area",
+    "crystallite size": "crystallite_size",
+    "particle size": "particle_size",
+    "conversion": "conversion",
+    "degradation efficiency": "conversion",
+    "removal efficiency": "conversion"
+  },
+  "texts": {
+    "report_title": "文献数据清洗异常与边界报告",
+    "report_intro": "由 literature-data-cleaner v%s 依据本次实际输入生成（非示例）。",
+    "claim": {
+      "converted": "%s 的 %s 由 %s %s 按 %s 归一为 %s %s",
+      "pending": "%s 的 %s 未能确认（%s），已列入待人工确认，未写成真值",
+      "counts": "读入 %d 行抽取记录，清洗后 %d 行，可直接统计 %d 行；重复合并 %d 行，冲突 %d 组，待人工确认 %d 条",
+      "passthrough": "%s 的 %s 为单位一致数值 %s %s"
+    },
+    "method_notes": [
+      "算对标准 1: 每个输出值能沿 row_id -> original_value -> rule_id -> change_log.formula 回到输入行。",
+      "算对标准 2: after = before*factor + offset，verify_report.json 逐行复算一致率应为 100%。",
+      "算对标准 3: 未知/缺失单位不换算，cleaned.csv 单元格为空且 status=needs_review。",
+      "算对标准 4: 区间与误差不压成单值；不同来源/条件的行不合并。",
+      "复跑方式: 同一 --input 加 --determinism 连跑两次，8 个产物应逐字节一致。"
+    ],
+    "boundary": [
+      "只做字面可判定的编码与换算；单位能算而科学上矛盾时标 source_conflict，不靠换算抹平。",
+      "未确认值只在 pending_review.csv，cleaned.csv 对应单元格为空。",
+      "无目标 schema 时使用 references/rules_library.json 的 target_schema。",
+      "无法识别单位、缺单位、文本型测量值一律不猜。",
+      "condition 列仅作为判定键与文本保留，不做条件单位换算。"
+    ],
+    "artifacts": {
+      "cleaned_table": "cleaned.csv",
+      "change_log": "change_log.csv",
+      "pending_review": "pending_review.csv",
+      "anomaly_report": "anomaly_report.md",
+      "rules": "rules.json",
+      "field_mapping": "field_mapping.json",
+      "unit_table": "unit_table.json"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "note": "Tone-locked response frames. {b}=baseline name, {d}=deliverable, {loc}=block locator, {s}=evidence status, {n}=note.",
+  "en": {
+    "title": "# Response to Reviewers (draft)",
+    "scope": "Scope note: this draft accompanies a controlled revision of the organizer baseline `{b}`. It answers the organizer's comment summary point by point; quotations reproduce that summary, not the reviewer's verbatim report. No experiment, dataset or literature beyond the supplied materials was added.",
+    "accept": "We thank the reviewer for this point and agree with it.",
+    "partial": "We agree with this point in part and have implemented it as far as the supplied materials allow.",
+    "reject": "We appreciate the concern; after re-checking the baseline text we respectfully retain the original statement.",
+    "clarify": "We thank the reviewer for raising this point and clarify the wording below.",
+    "invalid": "We respectfully note what appears to be a mismatch between this comment and the baseline text.",
+    "rev": "Revised text (`{loc}` of `{d}`):",
+    "na": "Recorded as not yet implemented in this baseline revision; see `evidence_pending.md`.",
+    "ev": "Evidence status: {s} — {n}",
+    "kept": "Unchanged anchor (`{loc}`):"
+  },
+  "zh": {
+    "title": "# 审稿意见逐条回复（草案）",
+    "scope": "范围说明：本草案对应组织方基线 `{b}` 的受控修订演练，逐条回应组织方整理的意见摘要。文中所引为意见摘要原文，不是审稿报告逐字全文；未新增材料之外的实验、数据或文献。",
+    "accept": "感谢审稿人指出这一点，我们接受并已处理。",
+    "partial": "我们部分接受该意见，在现有材料允许的范围内已作处理。",
+    "reject": "我们理解审稿人的关切，但复核基线原文后，我们礼貌地保留原表述。",
+    "clarify": "感谢审稿人提出这一点，现就其含义作澄清。",
+    "invalid": "我们需礼貌指出：该意见与基线文本存在事实性出入。",
+    "rev": "修订后文本（`{d}` 的 `{loc}`）：",
+    "na": "本条尚未在本次基线修订中落实，详见 `evidence_pending.md`。",
+    "ev": "证据状态：{s} —— {n}",
+    "kept": "未改动锚点（`{loc}`）："
+  }
+}

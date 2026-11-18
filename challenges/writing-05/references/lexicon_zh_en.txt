@@ -1,0 +1,70 @@
+# writing-03 中英概念词表 v1（Tab 分隔：中文短语 -> 英文概念词）
+# 用途：中文原稿与英文文献之间做论断-来源匹配的术语归一；只做概念对齐，不改写原文、不引入新事实。
+# 维护：按学科扩充；不确定的术语不要加，避免把不同概念强行等同。
+维生素D	vitamin
+维生素	vitamin
+呼吸道感染	respiratory infection
+感染	infection
+补充剂	supplementation
+补充	supplementation
+缺乏	deficiency
+低水平	low
+水平	level
+风险	risk
+风险升高	higher risk
+发病率	incidence
+发生率	incidence
+患病率	prevalence
+显著	significant
+不显著	no significant
+差异	difference
+无差异	no difference
+安慰剂	placebo
+随机对照试验	randomized trial
+随机	randomized
+对照	controlled
+试验	trial
+队列	cohort
+前瞻	prospective
+纵向	longitudinal
+随访	follow-up
+横断面	cross sectional
+病例对照	case control
+综述	review
+系统评价	systematic review
+荟萃分析	meta analysis
+指南	guideline
+共识	consensus
+预印本	preprint
+样本	sample
+受试者	participants
+患者	patients
+成人	adults
+儿童	children
+小鼠	mice
+细胞	cell
+体外	in vitro
+剂量	dose
+效应	effect
+效应量	effect size
+相关	associated
+关联	association
+因果	causal
+导致	causes
+降低	reduced
+升高	increased
+改善	improved
+有效	effective
+无效	no effect
+机制	mechanism
+结局	outcome
+终点	endpoint
+基线	baseline
+置信区间	confidence interval
+死亡率	mortality
+住院	hospitalization
+安全	safety
+不良事件	adverse events
+随访期	follow up period
+干预	intervention
+暴露	exposure

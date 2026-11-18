@@ -1,0 +1,131 @@
+{
+  "version": "1.0.0",
+  "purpose": "Reusable vocabularies for reviewer-comment triage (writing-07). Safe to edit: unknown keys are ignored by scripts/main.py.",
+  "cue_pattern": "(should|must|please|need|recommend|suggest|add|clarify|explain|provide|report|cite|include|remove|rewrite|revise|expand|shorten|justify|specify|define|state|discuss|compare|show|consider|avoid|ensure|correct|quantif|separate|merge|check|confirm|align|follow|standardise|standardize)|建议|请|需要|应|必须|补充|增加|删|修改|澄清|说明|解释|明确|给出|提供|引用|标注|统一|核实|改写|简述|讨论|比较|避免|确保|纠正|量化|报告|列出|注明|区分",
+  "types": {
+    "method": [
+      "method",
+      "methodolog",
+      "protocol",
+      "design",
+      "statistic",
+      "control",
+      "randomi",
+      "sample size",
+      "power",
+      "analysis",
+      "model",
+      "方法",
+      "统计",
+      "设计",
+      "对照",
+      "样本量",
+      "模型"
+    ],
+    "data": [
+      "data",
+      "dataset",
+      "result",
+      "replicat",
+      "effect size",
+      "p value",
+      "p-value",
+      "error bar",
+      "raw",
+      "数据",
+      "结果",
+      "重复",
+      "误差",
+      "数值"
+    ],
+    "format": [
+      "figure",
+      "fig.",
+      "table",
+      "reference",
+      "citation",
+      "format",
+      "style",
+      "legend",
+      "abbreviat",
+      "unit",
+      "supplement",
+      "图表",
+      "格式",
+      "参考文献",
+      "引用",
+      "缩写",
+      "单位"
+    ],
+    "ethics": [
+      "ethic",
+      "consent",
+      "approval",
+      "irb",
+      "conflict of interest",
+      "funding",
+      "availability",
+      "伦理",
+      "知情同意",
+      "利益冲突",
+      "基金",
+      "数据可得"
+    ],
+    "writing": [
+      "clarify",
+      "rewrite",
+      "language",
+      "grammar",
+      "unclear",
+      "concise",
+      "structure",
+      "logic",
+      "wording",
+      "vague",
+      "tense",
+      "表述",
+      "语言",
+      "润色",
+      "结构",
+      "逻辑",
+      "措辞",
+      "冗长",
+      "清晰"
+    ]
+  },
+  "new_work_pattern": "additional experiment|new experiment|re-?analy|re-?run|repeat the experiment|new data|extend the sample|new literature|补做|补充实验|重新分析|重做|新增实验|追加数据|补充文献",
+  "banned_claims": [
+    "we (?:have |had )?(?:performed|conducted|carried out) (?:the )?(?:additional|new|requested) (?:experiment|analysis|measurement)",
+    "已(?:补做|完成|新增)(?:实验|分析|测量|数据)",
+    "(?:the )?editor (?:has )?(?:accepted|decided to accept)|编辑部已(?:接收|录用|决定接收)",
+    "(?:the )?original authors? (?:have |has )?(?:revised|updated)|原作者已(?:改稿|修改)",
+    "verbatim (?:quote|text) of the reviewer|审稿人原话|逐字引用审稿",
+    "(?:the )?entire manuscript (?:has been|was) (?:fully )?revised|整篇全文(?:返修|修改)完成",
+    "we (?:have )?verified the (?:full |complete )?review report|已联网核验"
+  ],
+  "tone_map": {
+    "accept": "accept",
+    "partial": "clarify",
+    "reject": "polite_rebuttal",
+    "clarify": "clarify",
+    "invalid": "appeal"
+  },
+  "decision_rules": [
+    "default accept when the change is executable inside the supplied baseline",
+    "partial when only part of the sub-requirement can be met inside the baseline (record what is missing)",
+    "clarify when the comment rests on a reading of the text that the baseline does not support but no contradiction exists",
+    "reject when the requested change would contradict supplied facts; keep the paragraph and explain",
+    "invalid when the comment contradicts the baseline (wrong section, wrong number, already addressed); never silently drop it"
+  ],
+  "evidence_status": {
+    "provided": "the requested datum/reference already exists in the supplied materials and is cited by locator",
+    "not_provided": "not available in the supplied materials; state why and never claim it was produced",
+    "not_applicable": "the sub-requirement needs no new evidence"
+  },
+  "tone_levels": {
+    "accept": "agree, state the concrete change and its locator",
+    "clarify": "restate what the baseline actually says, then the change",
+    "polite_rebuttal": "acknowledge the concern, give the re-checked evidence, retain the text",
+    "appeal": "point out the mismatch factually and offer to comply if the editor prefers otherwise"
+  }
+}

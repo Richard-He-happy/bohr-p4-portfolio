@@ -1,0 +1,423 @@
+{
+  "version": "1.0.1",
+  "note": "Unit conversion table. value_in_base = value * scale + offset. Base units are Kg, m, s, mol, A, K, rad, 1(fraction). Alias matching is case sensitive unless the alias is listed explicitly.",
+  "base_units": {
+    "mass": "kg",
+    "length": "m",
+    "time": "s",
+    "amount": "mol",
+    "current": "A",
+    "temperature": "K",
+    "angle": "rad",
+    "fraction": "1"
+  },
+  "prefixes": {
+    "Y": 1e+24,
+    "Z": 1e+21,
+    "E": 1e+18,
+    "P": 1000000000000000.0,
+    "T": 1000000000000.0,
+    "G": 1000000000.0,
+    "M": 1000000.0,
+    "k": 1000.0,
+    "h": 100.0,
+    "da": 10.0,
+    "d": 0.1,
+    "c": 0.01,
+    "m": 0.001,
+    "u": 1e-06,
+    "n": 1e-09,
+    "p": 1e-12,
+    "f": 1e-15,
+    "a": 1e-18
+  },
+  "units": {
+    "g": {
+      "dim": {
+        "mass": 1
+      },
+      "scale": 0.001,
+      "aliases": [
+        "gram",
+        "grams",
+        "gm"
+      ]
+    },
+    "m": {
+      "dim": {
+        "length": 1
+      },
+      "scale": 1.0,
+      "aliases": [
+        "meter",
+        "metre",
+        "meters",
+        "metres"
+      ]
+    },
+    "s": {
+      "dim": {
+        "time": 1
+      },
+      "scale": 1.0,
+      "aliases": [
+        "sec",
+        "secs",
+        "second",
+        "seconds"
+      ]
+    },
+    "min": {
+      "dim": {
+        "time": 1
+      },
+      "scale": 60.0,
+      "aliases": [
+        "minute",
+        "minutes",
+        "mins"
+      ]
+    },
+    "h": {
+      "dim": {
+        "time": 1
+      },
+      "scale": 3600.0,
+      "aliases": [
+        "hr",
+        "hrs",
+        "hour",
+        "hours",
+        "H"
+      ]
+    },
+    "d": {
+      "dim": {
+        "time": 1
+      },
+      "scale": 86400.0,
+      "aliases": [
+        "day",
+        "days"
+      ]
+    },
+    "L": {
+      "dim": {
+        "length": 3
+      },
+      "scale": 0.001,
+      "aliases": [
+        "l",
+        "liter",
+        "litre",
+        "liters",
+        "litres"
+      ]
+    },
+    "mol": {
+      "dim": {
+        "amount": 1
+      },
+      "scale": 1.0,
+      "aliases": [
+        "mole",
+        "moles"
+      ]
+    },
+    "M": {
+      "dim": {
+        "amount": 1,
+        "length": -3
+      },
+      "scale": 1000.0,
+      "aliases": [
+        "molar"
+      ]
+    },
+    "K": {
+      "dim": {
+        "temperature": 1
+      },
+      "scale": 1.0,
+      "offset": 0.0,
+      "aliases": [
+        "kelvin"
+      ]
+    },
+    "C": {
+      "dim": {
+        "temperature": 1
+      },
+      "scale": 1.0,
+      "offset": 273.15,
+      "aliases": [
+        "°C",
+        "°c",
+        "degC",
+        "degc",
+        "celsius",
+        "oC"
+      ]
+    },
+    "F": {
+      "dim": {
+        "temperature": 1
+      },
+      "scale": 0.5555555555555556,
+      "offset": 255.37222222222223,
+      "aliases": [
+        "°F",
+        "°f",
+        "degF",
+        "fahrenheit"
+      ]
+    },
+    "Pa": {
+      "dim": {
+        "mass": 1,
+        "length": -1,
+        "time": -2
+      },
+      "scale": 1.0,
+      "aliases": [
+        "pascal",
+        "pascals"
+      ]
+    },
+    "bar": {
+      "dim": {
+        "mass": 1,
+        "length": -1,
+        "time": -2
+      },
+      "scale": 100000.0
+    },
+    "atm": {
+      "dim": {
+        "mass": 1,
+        "length": -1,
+        "time": -2
+      },
+      "scale": 101325.0,
+      "aliases": [
+        "atmosphere"
+      ]
+    },
+    "torr": {
+      "dim": {
+        "mass": 1,
+        "length": -1,
+        "time": -2
+      },
+      "scale": 133.32236842105263,
+      "aliases": [
+        "Torr",
+        "mmHg"
+      ]
+    },
+    "psi": {
+      "dim": {
+        "mass": 1,
+        "length": -1,
+        "time": -2
+      },
+      "scale": 6894.757293168361
+    },
+    "J": {
+      "dim": {
+        "mass": 1,
+        "length": 2,
+        "time": -2
+      },
+      "scale": 1.0,
+      "aliases": [
+        "joule",
+        "joules"
+      ]
+    },
+    "eV": {
+      "dim": {
+        "mass": 1,
+        "length": 2,
+        "time": -2
+      },
+      "scale": 1.602176634e-19
+    },
+    "Wh": {
+      "dim": {
+        "mass": 1,
+        "length": 2,
+        "time": -2
+      },
+      "scale": 3600.0
+    },
+    "cal": {
+      "dim": {
+        "mass": 1,
+        "length": 2,
+        "time": -2
+      },
+      "scale": 4.184,
+      "aliases": [
+        "calorie",
+        "calories"
+      ]
+    },
+    "W": {
+      "dim": {
+        "mass": 1,
+        "length": 2,
+        "time": -3
+      },
+      "scale": 1.0,
+      "aliases": [
+        "watt",
+        "watts"
+      ]
+    },
+    "N": {
+      "dim": {
+        "mass": 1,
+        "length": 1,
+        "time": -2
+      },
+      "scale": 1.0,
+      "aliases": [
+        "newton",
+        "newtons"
+      ]
+    },
+    "A": {
+      "dim": {
+        "current": 1
+      },
+      "scale": 1.0,
+      "aliases": [
+        "amp",
+        "amps",
+        "ampere"
+      ]
+    },
+    "deg": {
+      "dim": {
+        "angle": 1
+      },
+      "scale": 0.017453292519943295,
+      "aliases": [
+        "degree",
+        "degrees",
+        "°"
+      ]
+    },
+    "rad": {
+      "dim": {
+        "angle": 1
+      },
+      "scale": 1.0,
+      "aliases": [
+        "radian",
+        "radians"
+      ]
+    },
+    "%": {
+      "dim": {
+        "fraction": 1
+      },
+      "scale": 0.01,
+      "aliases": [
+        "percent",
+        "pct"
+      ]
+    },
+    "ppm": {
+      "dim": {
+        "fraction": 1
+      },
+      "scale": 1e-06
+    },
+    "ppb": {
+      "dim": {
+        "fraction": 1
+      },
+      "scale": 1e-09
+    },
+    "ppth": {
+      "dim": {
+        "fraction": 1
+      },
+      "scale": 0.001,
+      "aliases": [
+        "‰"
+      ]
+    },
+    "1": {
+      "dim": {},
+      "scale": 1.0,
+      "aliases": [
+        "dimensionless",
+        "counts",
+        "count",
+        "times"
+      ]
+    }
+  },
+  "unknown_unit_tokens": [
+    "a.u.",
+    "au",
+    "arb. units",
+    "arb units",
+    "arbitrary units",
+    "arb.",
+    "arb",
+    "n.a.",
+    "na",
+    "unknown",
+    "unclear",
+    "tbd",
+    "?",
+    "×",
+    "x",
+    "rel.",
+    "rel",
+    "s.u.",
+    "sigma",
+    "intensity",
+    "abs.",
+    "abs",
+    "cnt",
+    "counts/s",
+    "a.u./a.u."
+  ],
+  "canonical": {
+    "": "1",
+    "amount:1": "mol",
+    "amount:1,length:-2,time:-1": "mol/m2/h",
+    "amount:1,length:-3": "mol/L",
+    "amount:1,length:-3,time:-1": "mol/L/h",
+    "angle:1": "deg",
+    "current:1": "A",
+    "fraction:1": "%",
+    "fraction:1,time:-1": "%/h",
+    "length:1": "m",
+    "length:-2,mass:1,time:-1": "g/m2/h",
+    "length:3": "L",
+    "mass:1": "g",
+    "length:-1,mass:1,time:-2": "Pa",
+    "length:-3,mass:1": "mg/L",
+    "length:-3,mass:1,time:-1": "mg/L/h",
+    "length:1,mass:1,time:-2": "N",
+    "length:2,mass:1,time:-2": "J",
+    "length:2,mass:1,time:-3": "W",
+    "mass:1,time:-2": "J/m2",
+    "mass:1,time:-3": "W/m2",
+    "temperature:1": "K",
+    "time:1": "s",
+    "time:-1": "1/h"
+  },
+  "canonical_notes": {
+    "derived": "A dimension signature absent from 'canonical' gets a derived base-unit canonical string; the change log marks note='derived_canonical' and the factor stays exact.",
+    "temperature": "Only a pure temperature dimension uses the offset; temperature inside a compound unit converts by scale only.",
+    "fraction": "Percent / ppm / ppb form their own 'fraction' dimension so a plain count is never silently re-expressed as a percentage.",
+    "slash": "Left-to-right slash chaining: mg/L/h means mg per litre per hour (every '/' inverts the exponent)."
+  }
+}
