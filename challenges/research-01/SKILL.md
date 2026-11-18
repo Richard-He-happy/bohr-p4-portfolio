@@ -128,4 +128,4 @@ quote 三级校验：`strict`（归一化空白后逐字命中）> `whitespace_i
 | `references/rubric_map.md` | 评分点 → 字段 → 检查 → 产物 对照 |
 | `references/example.md` | 最小示例与演练步骤（标注示例） |
 
-版本 1.0.0。调整拆解或检索策略只需改 `protocol.md` 的模板与检索词（无需改代码）；改版式改 `research_core.tb` 的调用点。回归自检：`--stage auto` 后看 `selfcheck.json` 是否 7/7。
+版本 1.0.0。调整拆解或检索策略只需改 `protocol.md` 的模板与检索词（无需改代码）；改版式改 `research_core.py` 的 `tb` 调用点。回归自检：`--stage auto` 后看 `selfcheck.json` 是否 7/7。

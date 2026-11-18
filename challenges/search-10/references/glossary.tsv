@@ -1,0 +1,75 @@
+# Cross-lingual concept table for the cross-lingual-known-item-search skill.
+# Provenance: hand-curated by the skill author from standard biomedical usage;
+# terms follow MeSH-style English head words, with the conventional form used in
+# each target language. No licensed database was copied. License: CC0-1.0.
+# Accuracy: seed quality only. Every term that decides a candidate must be
+# confirmed against the corpus text (see method.md, 'term verification').
+# Columns: concept_id, en, pt, es, fr, de, ja, zh, abbrev (blank = none).
+# Extend by appending rows; never change an existing concept_id meaning.
+
+concept_id	en	pt	es	fr	de	ja	zh	abbrev
+pyroptosis	pyroptosis	piroptose	piroptosis	pyroptose	Pyroptose	パイロトーシス	细胞焦亡	
+apoptosis	apoptosis	apoptose	apoptosis	apoptose	Apoptose	アポトーシス	细胞凋亡	
+autophagy	autophagy	autofagia	autofagia	autophagie	Autophagie	オートファジー	自噬	
+necrosis	necrosis	necrose	necrosis	nécrose	Nekrose	壊死	坏死	
+cell_death	cell death	morte celular	muerte celular	mort cellulaire	Zelltod	細胞死	细胞死亡	
+inflammation	inflammation	inflamação	inflamación	inflammation	Entzündung	炎症	炎症	
+inflammasome	inflammasome	inflamassoma	inflamasoma	inflammasome	Inflammasom	インフラマソーム	炎症小体	
+macrophage	macrophage	macrófago	macrófago	macrophage	Makrophage	マクロファージ	巨噬细胞	
+cytokine	cytokine	citocina	citoquina	cytokine	Zytokin	サイトカイン	细胞因子	
+interleukin	interleukin	interleucina	interleucina	interleukine	Interleukin	インターロイキン	白细胞介素	IL
+tumor_necrosis_factor	tumor necrosis factor	fator de necrose tumoral	factor de necrosis tumoral	facteur de nécrose tumorale	Tumornekrosefaktor	腫瘍壊死因子	肿瘤坏死因子	TNF
+tumor	tumor	tumor	tumor	tumeur	Tumor	腫瘍	肿瘤	
+carcinoma	carcinoma	carcinoma	carcinoma	carcinome	Karzinom	癌腫	癌	
+metastasis	metastasis	metástase	metástasis	métastase	Metastase	転移	转移	
+chemotherapy	chemotherapy	quimioterapia	quimioterapia	chimiothérapie	Chemotherapie	化学療法	化疗	
+radiotherapy	radiotherapy	radioterapia	radioterapia	radiothérapie	Strahlentherapie	放射線療法	放疗	
+immunotherapy	immunotherapy	imunoterapia	inmunoterapia	immunothérapie	Immunotherapie	免疫療法	免疫治疗	
+gut_microbiota	gut microbiota	microbiota intestinal	microbiota intestinal	microbiote intestinal	Darmmikrobiota	腸内細菌叢	肠道菌群	
+microbiome	microbiome	microbioma	microbioma	microbiome	Mikrobiom	マイクロバイオーム	微生物组	
+intestine	intestine	intestino	intestino	intestin	Darm	腸	肠	
+liver	liver	fígado	hígado	foie	Leber	肝臓	肝	
+kidney	kidney	rim	riñón	rein	Niere	腎臓	肾	
+lung	lung	pulmão	pulmón	poumon	Lunge	肺	肺	
+oxidative_stress	oxidative stress	estresse oxidativo	estrés oxidativo	stress oxydatif	oxidativer Stress	酸化ストレス	氧化应激	
+reactive_oxygen_species	reactive oxygen species	espécies reativas de oxigênio	especies reactivas de oxígeno	espèces réactives de l'oxygène	reaktive Sauerstoffspezies	活性酸素種	活性氧	ROS
+signaling_pathway	signaling pathway	via de sinalização	vía de señalización	voie de signalisation	Signalweg	シグナル伝達経路	信号通路	
+receptor	receptor	receptor	receptor	récepteur	Rezeptor	受容体	受体	
+gene_expression	gene expression	expressão gênica	expresión génica	expression génique	Genexpression	遺伝子発現	基因表达	
+mutation	mutation	mutação	mutación	mutation	Mutation	変異	突变	
+protein	protein	proteína	proteína	protéine	Protein	タンパク質	蛋白	
+biomarker	biomarker	biomarcador	biomarcador	biomarqueur	Biomarker	バイオマーカー	生物标志物	
+clinical_trial	clinical trial	ensaio clínico	ensayo clínico	essai clinique	klinische Studie	臨床試験	临床试验	
+randomized_trial	randomized controlled trial	ensaio clínico randomizado	ensayo clínico aleatorizado	essai contrôlé randomisé	randomisierte kontrollierte Studie	ランダム化比較試験	随机对照试验	RCT
+systematic_review	systematic review	revisão sistemática	revisión sistemática	revue systématique	systematische Übersicht	系統的レビュー	系统评价	
+meta_analysis	meta-analysis	meta-análise	metanálisis	méta-analyse	Metaanalyse	メタアナリシス	荟萃分析	
+cohort_study	cohort study	estudo de coorte	estudio de cohorte	étude de cohorte	Kohortenstudie	コホート研究	队列研究	
+patient	patient	paciente	paciente	patient	Patient	患者	患者	
+mortality	mortality	mortalidade	mortalidad	mortalité	Mortalität	死亡率	死亡率	
+diagnosis	diagnosis	diagnóstico	diagnóstico	diagnostic	Diagnose	診断	诊断	
+treatment	treatment	tratamento	tratamiento	traitement	Behandlung	治療	治疗	
+vaccine	vaccine	vacina	vacuna	vaccin	Impfstoff	ワクチン	疫苗	
+antibody	antibody	anticorpo	anticuerpo	anticorps	Antikörper	抗体	抗体	
+sepsis	sepsis	sepse	sepsis	sepsis	Sepsis	敗血症	脓毒症	
+fibrosis	fibrosis	fibrose	fibrosis	fibrose	Fibrose	線維化	纤维化	
+ischemia	ischemia	isquemia	isquemia	ischémie	Ischämie	虚血	缺血	
+diabetes	diabetes	diabetes	diabetes	diabète	Diabetes	糖尿病	糖尿病	
+obesity	obesity	obesidade	obesidad	obésité	Adipositas	肥満	肥胖	
+hypertension	hypertension	hipertensão	hipertensión	hypertension	Hypertonie	高血圧	高血压	
+alzheimer	Alzheimer disease	doença de Alzheimer	enfermedad de Alzheimer	maladie d'Alzheimer	Alzheimer-Krankheit	アルツハイマー病	阿尔茨海默病	
+parkinson	Parkinson disease	doença de Parkinson	enfermedad de Parkinson	maladie de Parkinson	Parkinson-Krankheit	パーキンソン病	帕金森病	
+covid19	COVID-19	COVID-19	COVID-19	COVID-19	COVID-19	COVID-19	新型冠状病毒肺炎	COVID-19
+sars_cov_2	SARS-CoV-2	SARS-CoV-2	SARS-CoV-2	SARS-CoV-2	SARS-CoV-2	SARS-CoV-2	新型冠状病毒	SARS-CoV-2
+epidemiology	epidemiology	epidemiologia	epidemiología	épidémiologie	Epidemiologie	疫学	流行病学	
+prevalence	prevalence	prevalência	prevalencia	prévalence	Prävalenz	有病率	患病率	
+incidence	incidence	incidência	incidencia	incidence	Inzidenz	発生率	发病率	
+adverse_event	adverse event	evento adverso	evento adverso	événement indésirable	unerwünschtes Ereignis	有害事象	不良事件	
+dose	dose	dose	dosis	dose	Dosis	用量	剂量	
+expression_profile	expression profile	perfil de expressão	perfil de expresión	profil d'expression	Expressionsprofil	発現プロファイル	表达谱	
+transcription	transcription	transcrição	transcripción	transcription	Transkription	転写	转录	
+translation_bio	translation	tradução	traducción	traduction	Translation	翻訳	翻译	
+immune_response	immune response	resposta imune	respuesta inmunitaria	réponse immunitaire	Immunantwort	免疫応答	免疫应答	
+chronic	chronic	crônico	crónico	chronique	chronisch	慢性	慢性	
+acute	acute	agudo	agudo	aigu	akut	急性	急性	
+pediatric	pediatric	pediátrico	pediátrico	pédiatrique	pädiatrisch	小児	儿科	
+elderly	elderly	idoso	anciano	personne âgée	ältere Menschen	高齢者	老年人	

@@ -45,11 +45,11 @@
 ### 契约回填规则
 
 1. 输入 `output_contract` 的键名不改、不新增语义、未知键保留；无值的标量写 `null`，列表写 `[]`。
-2. 语义识别（大小写/下划线不敏感的子串匹配）：`inventory/files/manifest/catalog` → 文件清单；
-   `classification/directory/folder` → 分类；`tag/label/keyword` → 标签；`name/rename/filename` → 命名；
+2. 语义识别（大小写/下划线不敏感的子串匹配）：`case_id` → 输入标识；`inventory/files/manifest/catalog` → 文件清单；
+   `classification/directory/folder` → 分类；`tag/label/keyword` → 标签；`name/rename/filename/naming` → 命名；
    `dup/dedup` → 重复；`version/chain` → 版本；`operations/log/audit` → 操作；`metadata/biblio` → 元数据；
    `evid/provenance/locator` → 证据；`uncertain/risk` → 不确定性；`pending/human` → 人工项；`error/fail/skip` → 错误；
-   `status` → 状态；`tree/structure` → 目录树；`coverage/summary/count` → 覆盖率与计数；`csv` → CSV 文件名。
+   `degrad/downgrade` → 降级；`status` → 状态；`tree/structure/layout/library` → 目录树；`coverage/summary/count` → 覆盖率与计数；`csv` → CSV 文件名。
 3. 同一份值既写在 `output_contract` 内，也在不与基础键冲突时镜像到顶层；冲突键记录在 `contract_backfill.base_key_collisions`。
 
 ## 3. inventory.csv 列

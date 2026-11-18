@@ -46,8 +46,6 @@
 python3 scripts/main.py --input /input --output /app/output
 # 也可以追加临时提问：
 python3 scripts/main.py --input /input --output /app/output --query "batch B-07 sample storage"
-# 调试单个文件抽取：
-python3 scripts/engine.py /input/artifacts/protocol_v2_final_2021.pdf
 ```
 
 ## 3. 输出（示例，截断）

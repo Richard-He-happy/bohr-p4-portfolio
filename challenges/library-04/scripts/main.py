@@ -33,7 +33,7 @@ def dwrite(path, obj):
 
 def load_case(indir):
     case, src, errs = {}, None, []
-    for cand in [indir / "case.json"] + sorted(indir.glob("case*.json")):
+    for cand in sorted(indir.glob("case*.json")):
         try:
             case, src = json.loads(cand.read_text(encoding="utf-8", errors="replace")), str(cand)
             break

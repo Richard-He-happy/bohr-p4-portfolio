@@ -64,7 +64,7 @@ MAPS = ("version_chains=versionchain versions versionrel chain 版本关系 版�
     "permissions=permission access 权限;uncertainty=uncertain ambigu 不确定;pending_human=pending human manual 人工;"
     "metadata_summary=metadata 字段 元数据;queries=quer question search answer finding 检索 问答;"
     "operations=operation log evidence audit 操作 证据;failures=fail error skip 异常 失败 跳过;"
-    "counts=count stat metric 计数;status=status state 状态;artifacts=artifact output deliverable 产物;"
+    "status=status state 状态;counts=count stat metric 计数;artifacts=artifact output deliverable 产物;"
     "summary=summary overview 摘要 概述;directories=dir folder tree structure 目录结构;"
     "files=inventory filelist listing catalog 清单 documents files 文件")
 MAP = [(d.split("=")[0], d.split("=")[1].split()) for d in MAPS.split(";")]
@@ -258,7 +258,7 @@ def search(q, files, segs, res, k):
     qt, a0, a1 = engine.quote_at(c["t"], hit)
     hint, frag = engine.loc_str(c["loc"], a0, a1, c["sec"])
     out["hits"].append({"rank": len(out["hits"]) + 1, "file": c["f"], "sha256": (h or "")[:16], "locator": c["loc"],
-                        "section": c["sec"], "locator_hint": hint, "backlink": frag, "quote": qt,
+                        "section": c["sec"], "locator_hint": hint, "backlink": c["f"] + "#" + frag, "quote": qt,
                         "score": round(s, 3), "matched_terms": sorted(set(hit))[:24], "quote_verified": None,
                         "matched_primary": len({t for t in hit if terms.get(t) == 1.0}),
                         "dup_group": rec.get("dup_group"),

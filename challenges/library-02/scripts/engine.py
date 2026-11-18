@@ -330,12 +330,18 @@ def dim_match(key, names):
 
 def filters_of(qo, qtext):
   f = {}
+  def scan(d):
+    for k, v in d.items():
+      if isinstance(v, dict):
+        scan(v)
+        continue
+      if v in (None, "", [], {}):
+        continue
+      for dim, names in FK.items():
+        if dim_match(k, names):
+          f.setdefault(dim, []).extend(v if isinstance(v, list) else [str(v)])
   if isinstance(qo, dict):
-    for k, v in qo.items():
-      if v not in (None, "", [], {}):
-        for dim, names in FK.items():
-          if dim_match(k, names):
-            f.setdefault(dim, []).extend(v if isinstance(v, list) else [str(v)])
+    scan(qo)
   t = norm(qtext)
   f.setdefault("year", []).extend(re.findall(r"(?<!\d)((?:19|20)\d{2})(?!\d)", t))
   m = RX_PROJ.search(qtext)

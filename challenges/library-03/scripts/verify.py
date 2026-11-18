@@ -147,7 +147,12 @@ def cnt(items, k):
 
 
 def lk(comp, k, al):
+    if not isinstance(comp, dict):
+        return None
     kk = re.sub(r'[^a-z0-9]+', '_', str(k).lower()).strip('_')
+    for ck, v in comp.items():
+        if re.sub(r'[^a-z0-9]+', '_', str(ck).lower()).strip('_') == kk:
+            return v
     for n, ps in al:
         if any(p in kk for p in ps):
             return comp.get(n)
@@ -229,7 +234,7 @@ def assemble(x):
     cls = [r['cls'] for r in m if r.get('cls')]
     tr = tree(m, x['dirs'])
     lo = [r['rel_path'] for r in m if r.get('cls', {}).get('confidence') == 'low']
-    c = {'status': x['st'], 'inv_csv': 'inventory.csv', 'cls': cls, 'ev': [], 'pend': x['pend'], 'err': x['err'],
+    c = {'status': x['st'], 'inv_csv': 'inventory.csv', 'cls': cls, 'ev': [], 'pend': x['pend'], 'err': x['err'], 'deg': x['deg'], 'case_id': x['case'].get('case_id'),
          'inv': [{'file_id': r['file_id'], 'path': r['rel_path'], 'role': r['role'], 'type': r.get('kind'), 'mime': r.get('mime'),
                   'size': r.get('size'), 'sha256': r.get('sha256'), 'mtime': r.get('mtime'), 'permissions': r['permissions'],
                   'read_status': r.get('read_status'), 'staged_path': r.get('staged_path'), 'staged_sha256': r.get('staged_sha256')} for r in x['rec']],

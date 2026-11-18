@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "note": "Machine-readable config for scripts/main.py. UTF-8 text resource, stdlib json only. Agent may extend criteria text; keep keys stable.",
+  "stop": ["the", "a", "an", "and", "or", "of", "for", "from", "with", "without", "into", "over", "under", "between", "among", "within", "about", "after", "before", "during", "while", "this", "that", "these", "those", "we", "our", "they", "their", "it", "its", "is", "are", "was", "were", "be", "been", "being", "to", "in", "on", "at", "as", "by", "not", "no", "do", "does", "did", "have", "has", "had", "can", "could", "may", "might", "should", "would", "will", "shall", "than", "then", "there", "here", "which", "who", "whom", "what", "when", "where", "why", "how", "using", "used", "use", "study", "studies", "paper", "papers", "article", "articles", "review", "reviews", "results", "result", "method", "methods", "conclusion", "conclusions", "introduction", "background", "however", "therefore", "thus", "also", "more", "most", "less", "least", "such", "other", "others", "new", "novel", "based", "approach", "approaches", "propose", "proposed", "present", "presents", "shown", "show", "shows", "across", "both", "each", "via", "per", "versus", "vs", "two", "three", "first", "second", "data", "set", "sets", "研究", "文献", "方法", "结果", "本文", "我们", "这些", "那些", "以及", "对于", "通过", "进行", "分析", "表明", "显示", "提出", "一个", "这种", "相关", "主要", "不同", "具有", "可以", "影响", "发现", "结论", "数据", "问题", "综述", "系统", "基于", "他们", "是", "的", "了", "和", "与", "在", "中", "对", "从", "为", "以"],
+  "markers": ["improv", "increas", "decreas", "reduc", "significan", "associat", "outperform", "no effect", "not significant", "higher", "lower", "superior", "inferior", "effective", "ineffective", "fail", "提高", "降低", "增加", "减少", "显著", "不显著", "有效", "无效", "优于", "劣于"],
+  "oppose": [["increas", "decreas"], ["提高", "降低"], ["增加", "减少"], ["improv", "fail"], ["significant", "not significant"], ["有效", "无效"], ["superior", "inferior"], ["positive", "negative"]],
+  "reason_codes": {
+    "I": ["I1 主题直接相关且报告可比较结果", "I2 提供机制/方法/指标/反例", "I3 提供该问题的数据集或基准"],
+    "E": ["E1 主题不符", "E2 对象/人群/场景不可迁移", "E3 方法或证据类型不支持论断", "E4 仅摘要且不足", "E5 重复", "E6 非研究性文本", "E7 年份/语言超范围", "E8 数据不可核验", "E9 其他（须写理由）"]
+  },
+  "criteria": {
+    "include": [
+      {"id": "I1", "text": "直接研究 {KEY} 的研究/综述/数据集，报告可比较的结果或方法"},
+      {"id": "I2", "text": "提供目标问题的机制、方法、评价指标或反例证据"},
+      {"id": "I3", "text": "提供可复用的数据集、基准或评测协议"}
+    ],
+    "exclude": [
+      {"id": "E1", "text": "主题与目标问题无关（仅共用宽泛关键词）"},
+      {"id": "E2", "text": "研究对象/人群/场景不可迁移"},
+      {"id": "E3", "text": "方法或证据类型无法支持待检验论断（观点、新闻、广告）"},
+      {"id": "E4", "text": "仅摘要且不足以支撑实质论断（保留，强度上限 inferred）"},
+      {"id": "E5", "text": "重复（DOI 相同或标题+年份一致），保留信息更全者"},
+      {"id": "E6", "text": "非研究性文本（目录、封面、授权页、勘误）"},
+      {"id": "E7", "text": "年份或语言超出题面给定范围"},
+      {"id": "E8", "text": "数据不可核验或明显不可靠"},
+      {"id": "E9", "text": "其他（note 必填理由）"}
+    ]
+  },
+  "aliases": {
+    "review_md": "md", "review": "md", "review_text": "md", "draft": "md", "report": "md", "manuscript": "md", "literature_review": "md",
+    "evidence_matrix": "ev", "evidence_table": "ev", "evidence": "ev", "evidence_map": "ev", "claims": "ev",
+    "screening": "scr", "screening_log": "scrrows", "screening_records": "scrrows",
+    "themes": "themes", "topics": "themes", "key_themes": "themes",
+    "gaps": "gaps", "research_gaps": "gaps", "open_questions": "gaps",
+    "conflicts": "conf", "controversies": "conf", "disagreements": "conf",
+    "uncertainty": "unc", "uncertainties": "unc", "limitations": "unc",
+    "references": "refs", "bibliography": "refs", "sources": "srcs", "papers": "srcs",
+    "summary": "sum", "abstract": "sum", "conclusion": "sum", "conclusions": "sum",
+    "coverage": "cov", "counts": "counts", "statistics": "counts",
+    "search": "log", "queries": "log", "search_log": "log", "status": "status", "case_id": "case_id"
+  },
+  "labels": {
+    "zh": {"t": "# 文献综述（基线草稿）", "note": "> 脚本生成的结构基线，语义与强度需覆写。", "rq": "## 1 研究问题", "cov": "## 2 检索与覆盖", "syn": "## 3 分主题综合", "con": "## 4 冲突与分歧", "gap": "## 5 研究空白", "lim": "## 6 强度与局限", "ref": "## 7 参考文献", "b": "依据", "s": "支撑", "covline": "材料 {f} 个文件，去重后 {u} 篇，纳入 {i} 篇，全文 {ft} 篇。标准见 protocol.json，逐条决定见 screening_log.csv。", "noc": "脚本级标记词对比未识别方向相反项；不等于文献间无分歧。", "lim2": "基线草稿未做强度判定，摘录强度均为 unassessed；降级项见 result.json 的 degradations / uncertainty。"},
+    "en": {"t": "# Literature review (baseline draft)", "note": "> Structural baseline from the corpus; semantics and grading must be overwritten.", "rq": "## 1 Research question", "cov": "## 2 Search and coverage", "syn": "## 3 Synthesis by theme", "con": "## 4 Conflicts", "gap": "## 5 Research gaps", "lim": "## 6 Strength and limits", "ref": "## 7 References", "b": "Basis", "s": "Sources", "covline": "{f} files, {u} unique sources, {i} included, {ft} full-text. Criteria: protocol.json; decisions: screening_log.csv.", "noc": "No opposite marker pair detected mechanically; this is not evidence of agreement.", "lim2": "No strength grading in baseline (all unassessed); see degradations / uncertainty in result.json."}
+  }
+}
