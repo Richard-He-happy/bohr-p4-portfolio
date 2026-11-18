@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "purpose": "组稿框架文本（不含任何事实）。事实句一律来自材料原文，框架只提供承接与指令。",
+    "version": "1.0.0",
+    "keys": {
+      "t": "文档标题",
+      "n": "文首注释（证据绑定说明）",
+      "h": "五个标题：背景/相关工作/研究空白/贡献/参考文献",
+      "bg": "背景三段的引导语（约束→现状→未解问题）",
+      "cd": "适用条件标签",
+      "lm": "局限标签",
+      "gp": "空白句模板 {route} {q} {k}",
+      "gn": "无空白依据时的说明",
+      "rw": "相关工作改写指引（HTML 注释）",
+      "rf": "参考文献区说明",
+      "td": "待核实标记"
+    }
+  },
+  "zh": {
+    "t": "引言与相关工作（证据绑定草稿 v1.0.0）",
+    "n": "<!-- 每句末尾的 [source_id#locator] 可回到 sources_index.json 逐字复核；改写只改表达，不改数字、术语、引用编号与结论强度。本节为草稿骨架，需作者按目标期刊语体重写连接句。 -->",
+    "h": ["研究背景", "相关工作", "研究空白", "本文贡献", "参考文献"],
+    "bg": ["领域任务与技术约束：", "现有做法的能力边界：", "尚未解决的具体问题："],
+    "cd": "适用条件",
+    "lm": "作者自陈局限",
+    "gp": "在{route}路线上，{q} [{k}]。",
+    "gn": "已引文献中未见可直接引用的限制陈述：需补充文献，或把该空白改写为作者判断并在正文标注。",
+    "rw": "改写指引：同组文献合并为一段，先写路线共性（问题设定+评价方式），再写差异与取舍；不要逐篇罗列摘要。",
+    "rf": "按正文首次引用编号排列；缺项标 [待补]，不要自行补全作者或年份。",
+    "td": "待核实"
+  },
+  "en": {
+    "t": "Introduction and Related Work (evidence-bound draft v1.0.0)",
+    "n": "<!-- Bracketed tags give source_id#locator, verifiable against sources_index.json. Rewrite wording only: keep numbers, terms, citation numbers and claim strength. This is a scaffold; rewrite connectives for the target venue. -->",
+    "h": ["Research Background", "Related Work", "Research Gaps", "Contributions", "References"],
+    "bg": ["Task and technical constraints: ", "Capability boundary of current practice: ", "The unresolved problem: "],
+    "cd": "conditions",
+    "lm": "stated limitation",
+    "gp": "Within the {route} route, {q} [{k}]. ",
+    "gn": "No citable limitation statement was found in the supplied literature: add sources, or restate this gap as author judgement and mark it.",
+    "rw": "Rewrite note: merge works of one route into one paragraph; give the shared problem setting and evaluation first, then differences and trade-offs; do not list abstracts one by one.",
+    "rf": "Numbered by first citation; missing fields flagged [TODO]; never fill in absent authors or years.",
+    "td": "TO-VERIFY"
+  }
+}

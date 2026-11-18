@@ -1,0 +1,133 @@
+{
+ "_doc": "Field-extraction rules for section-anchored-paper-notes v1.0.0. Loaded by scripts/main.py; edit here (no code change) to tune cue patterns, cards or contract aliases. Every pattern is a case-insensitive Python regex applied per sentence.",
+ "cues": [
+  [
+   "research_question",
+   "\\bwe (?:aim|aimed|set out to|investigat|examin|stud|test|quantif|address|explor)|this (?:stud|paper|work|report|analysis|analys)\\w* (?:aim|investigat|examin|address|report|present|quantif)|here,? we|the (?:aim|objective|goal|purpose) of|research question|\\bwhether\\b"
+  ],
+  [
+   "hypothesis",
+   "hypothes|we predict|we expected|it (?:was|is) (?:expected|hypothes)"
+  ],
+  [
+   "result",
+   "\\b(?:we|results?|data|analysis|measurements?)\\s+(?:found|observed|show|showed|shown|indicat|reveal|demonstrat)\\b|significan|increas|decreas|declin|reduc|higher|lower|greater|correlat|[\\u00b1]\\s*\\d|\\d+(?:\\.\\d+)?\\s*%|p\\s*[<=>]\\s*0?\\.\\d"
+  ],
+  [
+   "data_sample",
+   "\\b(?:dataset|data ?set|participants?|patients?|subjects?|mice|rats|animals?|samples?|specimens?|cohort|corpus|replicates?|plants?|seedlings?|cultivars?|n\\s*=\\s*\\d+)\\b"
+  ],
+  [
+   "conclusion",
+   "\\b(?:in conclusion|we conclude|these (?:results|findings|data) (?:suggest|indicat|show|demonstrat)|taken together|our (?:results|findings|data) (?:suggest|indicat|demonstrat))"
+  ],
+  [
+   "limitation",
+   "\\b(?:limitation|caveat|however|we (?:cannot|did not|could not|were unable)|future (?:work|studies|research)|remains? (?:unclear|unknown|open)|small sample|single (?:site|chamber|batch|centre|center)|did not (?:test|examine|measure|assess))\\b"
+  ],
+  [
+   "method",
+   "\\bwe (?:measur|quantif|comput|calculat|perform|analys|analy|estimat|fitt|simulat|cultur|assay|record|collect|grew|grown|incubat|extract|sequenc|imag|stain|test|us|appl|randomi|irrigat|sampl)|(?:were|was) (?:measur|grown|incubat|collect|extract|analys|analy|randomi|cultur|stain|imaged|sampl)|assays?\\b"
+  ],
+  [
+   "definition",
+   "\\b(?:is defined as|we define|refers? to|hereafter|termed|denoted as|abbreviated as)\\b"
+  ],
+  [
+   "figure_caption",
+   "^\\s*(?:Fig(?:ure)?\\.?|Tab(?:le)?\\.?)\\s*\\d+\\s*[:.\\u2014-]?\\s*\\S"
+  ],
+  [
+   "availability",
+   "\\b(?:data availability|available (?:at|from|on request)|deposited|accession|zenodo|dryad|github\\.com)\\b"
+  ],
+  [
+   "funding_coi",
+   "\\b(?:funded by|grant|competing interests?|conflicts? of interest|we thank|declare)\\b"
+  ]
+ ],
+ "cond": "n\\s*=\\s*\\d+|p\\s*[<=>]\\s*0?\\.\\d+|\\d+(?:\\.\\d+)?\\s?[\\u00b1]\\s?\\d+(?:\\.\\d+)?|\\b(?:at|under|in|with|during|after|before|for)\\s+(?:a\\s+)?\\d+(?:\\.\\d+)?\\s?[A-Za-z\\u00b5\\u03bc\\u00b0%/]{0,8}\\b|\\d+\\s?(?:h|min|days?|weeks?|months?|years?)\\b",
+ "num": "(-?\\d+(?:\\.\\d+)?)\\s*(%|mM|\\u00b5M|\\u03bcM|nM|mg|kg|\\u00b5g|\\u03bcg|mL|ml|L|h|min|days?|weeks?|months?|years?|\\u00b0C|K|nm|\\u00b5m|\\u03bcm|cm|mm|km|Hz|kHz|MHz|keV|eV|Pa|kPa|MPa|ppm)?",
+ "cap": "^\\s*(Fig(?:ure)?\\.?|Tab(?:le)?\\.?)\\s*([0-9]{1,2}[A-Za-z]?)\\s*[:.\\u2014-]?\\s*(.{0,400})$",
+ "purpose": {
+  "abstract": "研究问题与结论速览",
+  "intro": "背景与研究缺口",
+  "related": "相关工作定位",
+  "methods": "数据、材料与实验条件",
+  "results": "主要结果与数值",
+  "discussion": "解释、机制与边界",
+  "conclusion": "结论与展望",
+  "limitation": "限制与未验证项",
+  "references": "文献列表（不计入证据）",
+  "ack": "致谢、资助与声明",
+  "front": "题录信息",
+  "other": "未归类章节"
+ },
+ "card": [
+  "research_question",
+  "hypothesis",
+  "data_sample",
+  "methods",
+  "key_results",
+  "conclusions",
+  "limitations",
+  "funding_coi",
+  "availability"
+ ],
+ "alias": {
+  "key_results": [
+   "result"
+  ],
+  "conclusions": [
+   "conclusion"
+  ],
+  "limitations": [
+   "limitation"
+  ],
+  "methods": [
+   "method"
+  ]
+ },
+ "syn": {
+  "caseid": "case_id",
+  "id": "case_id",
+  "status": "status",
+  "runstatus": "status",
+  "sources": "sources",
+  "claims": "claims",
+  "keyclaims": "claims",
+  "evidence": "claims",
+  "quotes": "claims",
+  "notes": "notes_path",
+  "structurednotes": "notes_path",
+  "notepath": "notes_path",
+  "notespath": "notes_path",
+  "artifacts": "artifacts",
+  "papercard": "paper_card",
+  "card": "paper_card",
+  "sectionnotes": "section_notes",
+  "sections": "section_notes",
+  "figures": "figures",
+  "tables": "tables",
+  "uncertainty": "uncertainty",
+  "uncertainties": "uncertainty",
+  "pendinghuman": "pending_human",
+  "gaps": "gaps",
+  "gap": "gaps",
+  "errors": "errors",
+  "degradations": "degradations",
+  "changes": "changes",
+  "coverage": "coverage",
+  "counts": "counts",
+  "summary": "summary",
+  "title": "title",
+  "doi": "doi",
+  "keywords": "keywords",
+  "runtime": "runtime"
+ },
+ "limits": {
+  "max_claims": 80,
+  "max_claims_per_section": 8,
+  "max_documents": 6
+ }
+}

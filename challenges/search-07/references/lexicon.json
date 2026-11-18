@@ -1,0 +1,193 @@
+{
+ "version": "1.1.0",
+ "purpose": "Static vocabulary for search-coverage-gap-auditor: stopword list, miss-cause taxonomy (label/definition/evidence/repair), cause priority, and field-name aliases.",
+ "stopwords": [
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "by",
+  "can",
+  "do",
+  "does",
+  "for",
+  "from",
+  "has",
+  "have",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "our",
+  "that",
+  "the",
+  "their",
+  "these",
+  "this",
+  "to",
+  "was",
+  "were",
+  "which",
+  "with",
+  "using",
+  "used",
+  "use",
+  "new",
+  "study",
+  "review",
+  "paper",
+  "article",
+  "journal",
+  "effect",
+  "effects",
+  "versus",
+  "vs",
+  "et",
+  "al",
+  "may",
+  "also",
+  "between",
+  "among",
+  "after",
+  "before",
+  "under",
+  "over",
+  "more",
+  "less",
+  "than",
+  "not",
+  "no",
+  "non",
+  "via",
+  "per"
+ ],
+ "cause_priority": [
+  "C01",
+  "C02",
+  "C03",
+  "C04",
+  "C05",
+  "C06",
+  "C07",
+  "C08",
+  "C09",
+  "C10",
+  "C11",
+  "C12"
+ ],
+ "miss_taxonomy": {
+  "C01": {
+   "label": "in-pool, unmatched",
+   "definition": "The record is already inside the retained pool, but identifier/metadata differences kept it below the alignment threshold. Retrieval succeeded; alignment failed.",
+   "evidence": "matched pool record id + normalised title similarity + both DOI values",
+   "repair": "alignment repair: re-run the tiered matcher, auto-accept above threshold, queue the rest for human adjudication"
+  },
+  "C02": {
+   "label": "pool truncation / ranking cutoff",
+   "definition": "The query reported more hits than the records retained, so the record can sit below the retained cutoff. Attribution points at a specific query and its retained depth.",
+   "evidence": "query_id + reported hits + records retained",
+   "repair": "raise retrieval depth (max_k) for the named query and re-screen the deeper result list"
+  },
+  "C03": {
+   "label": "source recall failure",
+   "definition": "A query was topically able to match the record (term overlap above the capability threshold) and its filters admitted the record, yet the named source returned nothing for it.",
+   "evidence": "query_id + term overlap + source",
+   "repair": "re-issue the named query verbatim on the named source and check venue indexing coverage"
+  },
+  "C04": {
+   "label": "time-window truncation",
+   "definition": "The record's year falls outside the year filter of every capable query, or outside the organizer scope window.",
+   "evidence": "query_id (or scope) + [year_from, year_to] + reference year",
+   "repair": "re-run the named query with the year filter widened to cover the reference year"
+  },
+  "C05": {
+   "label": "field restriction",
+   "definition": "The query's terms would match the record, but the query restricted searching to fields (e.g. abstract only) that exclude where the match occurs (e.g. title).",
+   "evidence": "query_id + declared search fields + field where the overlap occurs",
+   "repair": "relax the restrictive field filter (title+abstract+keywords) for the named query"
+  },
+  "C06": {
+   "label": "query term gap",
+   "definition": "No query in the log contains the record's distinctive terms or a synonym of them, so no query could reach it.",
+   "evidence": "list of uncovered terms + nearest query + query vocabulary size",
+   "repair": "add the uncovered term group (synonyms) to the query and re-run"
+  },
+  "C07": {
+   "label": "source not covered",
+   "definition": "The record lives in a database/index that no query targeted.",
+   "evidence": "reference source + set of queried sources",
+   "repair": "add the missing source to the search and re-screen its hits"
+  },
+  "C08": {
+   "label": "language/filter exclusion",
+   "definition": "A language or document-type restriction excluded the record although the query was otherwise able to reach it.",
+   "evidence": "reference language + query language restriction",
+   "repair": "re-run without the language restriction, or add a translated query"
+  },
+  "C09": {
+   "label": "citation route unused",
+   "definition": "The record is reachable by one citation hop from material already retained (it is cited by, or cites, an included record), but no snowballing step was recorded.",
+   "evidence": "citation edge [citing, cited] + graph file path",
+   "repair": "backward+forward citation snowballing from the named included paper"
+  },
+  "C10": {
+   "label": "reference record anomaly",
+   "definition": "The reference record itself is problematic: missing/malformed DOI, missing year, duplicate record, retracted or not retrievable. Coverage accounting is affected, not the search strategy.",
+   "evidence": "anomaly flag + exclusion rule + raw reference fields",
+   "repair": "verify reference identity (DOI/title/authorship) before counting it as retrievable; report it separately"
+  },
+  "C11": {
+   "label": "no retrieval pool",
+   "definition": "No retrieved records were supplied or retained, so no miss can be attributed to a query.",
+   "evidence": "input manifest",
+   "repair": "run the planned queries and record query text, source and retrieved_at for each"
+  },
+  "C12": {
+   "label": "undetermined",
+   "definition": "The retained evidence does not support any concrete cause. Left open on purpose instead of guessing.",
+   "evidence": "list of missing evidence items",
+   "repair": "human adjudication with the missing evidence listed"
+  }
+ },
+ "path_hints": {
+  "reference": [
+   "reference",
+   "refs",
+   "seed",
+   "included",
+   "known",
+   "gold",
+   "relevant",
+   "expected",
+   "benchmark",
+   "must_find"
+  ],
+  "pool": [
+   "response",
+   "result",
+   "hit",
+   "record",
+   "retriev",
+   "pool",
+   "candidate",
+   "import",
+   "crossref",
+   "europepmc",
+   "epmc",
+   "publisher"
+  ],
+  "query": [
+   "quer",
+   "strateg",
+   "log"
+  ]
+ }
+}
