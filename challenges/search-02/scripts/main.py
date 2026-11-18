@@ -93,7 +93,7 @@ def shell(case_id, contract):
             "runtime": {"skill_version": V, "started_at": now(), "python": sys.version.split()[0],
                         "network": "disabled", "model_requests": 0}}
 
-def cand_row(c, best, s, why, sn, loc, rc):
+def cand_row(c, best, s, d, why, sn, loc, rc):
     r, bs, b = c["cand"], (best or {}).get("score", 0), best or {}
     fc = len({m["group"] for m in b.get("matched", [])} - {"topic"})
     return {"candidate_id": c["cid"], "title": r.get("title"), "authors": r.get("authors") or [],
@@ -104,7 +104,7 @@ def cand_row(c, best, s, why, sn, loc, rc):
             "relevance_score": round(min(1.0, .55 * (bs / (bs + 4.0)) + .3 * min(1.0, fc / 2.0) + .15 * rc), 3),
             "relevance_reason": "; ".join(why[:4]), "evidence_snippet": sn, "evidence_locator": loc,
             "metadata_confidence": "high" if (r.get("doi") and r.get("authors") and r.get("year")) else "medium",
-            "screening": {"decision": s["keep"], "flags": s["flags"]}, "provenance": c["members"],
+            "screening": {"decision": d, "flags": s["flags"]}, "provenance": c["members"],
             "flags": sorted(set(s["flags"] + (["duplicate_export_merged"] if c["dup"] else [])))}
 
 def run(a):
@@ -176,7 +176,7 @@ def run(a):
             rc = 0.0
             if r.get("year") and sc["y0"] and sc["y1"]:
                 rc = max(0.0, min(1.0, (r["year"] - sc["y0"]) / max(sc["y1"] - sc["y0"], 1)))
-            cands.append(cand_row(c, best, s, why, sn, loc, rc))
+            cands.append(cand_row(c, best, s, d, why, sn, loc, rc))
     cands.sort(key=lambda x: (-x["relevance_score"], x["candidate_id"]))
     top, low = cands[:k], cands[k:]
     p["candidates"] = top
