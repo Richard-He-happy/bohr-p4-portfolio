@@ -6,17 +6,6 @@ Each folder under `challenges/` is one submitted Skill package (`SKILL.md` + `sc
 
 | challenge | track | package |
 |---|---|---|
-| experiment-04 | experiment | [challenges/experiment-04](challenges/experiment-04) |
-| library-01 | library | [challenges/library-01](challenges/library-01) |
-| library-02 | library | [challenges/library-02](challenges/library-02) |
-| library-03 | library | [challenges/library-03](challenges/library-03) |
-| library-04 | library | [challenges/library-04](challenges/library-04) |
-| library-05 | library | [challenges/library-05](challenges/library-05) |
-| reading-03 | reading | [challenges/reading-03](challenges/reading-03) |
-| research-01 | research | [challenges/research-01](challenges/research-01) |
-| research-02 | research | [challenges/research-02](challenges/research-02) |
-| research-03 | research | [challenges/research-03](challenges/research-03) |
-| review-01 | review | [challenges/review-01](challenges/review-01) |
-| review-02 | review | [challenges/review-02](challenges/review-02) |
-| review-04 | review | [challenges/review-04](challenges/review-04) |
-| search-10 | search | [challenges/search-10](challenges/search-10) |
+| analysis-01 | analysis | [challenges/analysis-01](challenges/analysis-01) |
+| search-02 | search | [challenges/search-02](challenges/search-02) |
+| search-09 | search | [challenges/search-09](challenges/search-09) |

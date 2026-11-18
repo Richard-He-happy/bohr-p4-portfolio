@@ -1,0 +1,680 @@
+{
+ "version": "1.0.0",
+ "scope": "Field-level cleaning rules for transcribed scientific tables with injected storage/encoding faults. Values are never statistically imputed by default.",
+ "policy_default": "repair_and_flag",
+ "missing_tokens": {
+  "missing_blank": [
+   "",
+   "na",
+   "n/a",
+   "n.a.",
+   "n.a",
+   "nan",
+   "null",
+   "none",
+   "nil",
+   "-",
+   "--",
+   "---",
+   ".",
+   "?",
+   "nr",
+   "n.r.",
+   "缺",
+   "缺失",
+   "未填",
+   "无",
+   "空白",
+   "not available",
+   "not reported",
+   "不可用"
+  ],
+  "not_detected": [
+   "nd",
+   "n.d.",
+   "nd.",
+   "not detected",
+   "not-detected",
+   "notdetected",
+   "未检出",
+   "未检测",
+   "n/d",
+   "n.d",
+   "nd (not detected)"
+  ],
+  "below_loq": [
+   "bdl",
+   "bql",
+   "<lod",
+   "<loq",
+   "<dl",
+   "<l od",
+   "below lod",
+   "below loq",
+   "低于检出限",
+   "低于定量限",
+   "trace",
+   "tr"
+  ],
+  "sentinel": [
+   "-999",
+   "-9999",
+   "-999.0",
+   "-9999.0",
+   "-99",
+   "-99.0",
+   "9999",
+   "99999",
+   "999999",
+   "-1e99",
+   "1e99",
+   "1e+99",
+   "-1e+99"
+  ],
+  "explicit_zero_keep": [
+   "0",
+   "0.0",
+   "0.00",
+   "nd(0)",
+   "n.d.(0)"
+  ],
+  "note": "sentinel tokens are only treated as missing when outside every declared/physical bound; explicit_zero_keep is never converted to missing."
+ },
+ "fault_codes": {
+  "M1_missing_blank": {
+   "class": "missing",
+   "default_action": "set null + reason code",
+   "note": "empty or placeholder token, cause unknown"
+  },
+  "M2_not_detected": {
+   "class": "missing",
+   "default_action": "set null + censored flag ND",
+   "note": "measurement not detected; not equal to zero"
+  },
+  "M3_below_loq": {
+   "class": "missing",
+   "default_action": "set null + censored flag <LOQ",
+   "note": "censored value, unusable for means without a censoring model"
+  },
+  "M4_sentinel": {
+   "class": "missing",
+   "default_action": "set null + reason sentinel_code",
+   "note": "instrument/storage missing code (e.g. -999) distinct from a real reading"
+  },
+  "F1_numeric_format": {
+   "class": "format",
+   "default_action": "canonicalise to plain decimal, record original",
+   "note": "decimal comma, thousands separator, sci notation, trailing unit, footnote marker, full-width digits, unicode minus"
+  },
+  "F2_date_format": {
+   "class": "format",
+   "default_action": "canonicalise to ISO 8601, record parsed pattern",
+   "note": "mixed d/m/Y and Y-m-d, missing timezone"
+  },
+  "F3_encoding": {
+   "class": "format",
+   "default_action": "re-decode and record reversible mapping",
+   "note": "GBK read as latin-1 mojibake, BOM, replacement chars"
+  },
+  "U1_unit_inconsistent": {
+   "class": "format",
+   "default_action": "convert to dictionary canonical unit, keep factor + original",
+   "note": "same metric reported in mg/L and ug/mL etc."
+  },
+  "U2_unit_ambiguous": {
+   "class": "format",
+   "default_action": "keep value, flag, escalate to human",
+   "note": "ppm without matrix context, unknown unit token"
+  },
+  "D1_duplicate_exact": {
+   "class": "duplicate",
+   "default_action": "remove later copies, quarantine row",
+   "note": "byte-identical data record"
+  },
+  "D2_duplicate_key": {
+   "class": "duplicate",
+   "default_action": "remove later copies, keep most complete row",
+   "note": "same normalised composite primary key"
+  },
+  "D3_near_duplicate": {
+   "class": "duplicate",
+   "default_action": "do not remove, escalate to human",
+   "note": "key differs only by separators/case/leading zeros/unit spelling"
+  },
+  "R1_range_violation": {
+   "class": "outlier",
+   "default_action": "keep value, flag, do not delete",
+   "note": "outside data-dictionary physical bound"
+  },
+  "R2_distribution_outlier": {
+   "class": "outlier",
+   "default_action": "keep value, flag robust MAD z",
+   "note": "statistical outlier; may be a genuine extreme"
+  },
+  "T1_type_conflict": {
+   "class": "return",
+   "default_action": "keep raw text, flag",
+   "note": "unparseable value in a numeric column, range '1.2-1.5', '1.5 +- 0.2'"
+  }
+ },
+ "units": {
+  "concentration_mass": {
+   "canonical": "mg/L",
+   "factors": {
+    "mg/l": 1.0,
+    "mg/liter": 1.0,
+    "ppm": 1.0,
+    "ug/ml": 1.0,
+    "mcg/ml": 1.0,
+    "g/m3": 1.0,
+    "mg/kg": 1.0,
+    "ug/l": 0.001,
+    "mcg/l": 0.001,
+    "ng/ml": 0.001,
+    "g/l": 1000.0,
+    "mg/ml": 1000.0,
+    "g/ml": 1000000.0,
+    "ng/l": 1e-06,
+    "pg/ml": 1e-06
+   }
+  },
+  "concentration_molar": {
+   "canonical": "mol/L",
+   "factors": {
+    "mol/l": 1.0,
+    "m": 1.0,
+    "mm": 0.001,
+    "mmol/l": 0.001,
+    "umol/l": 1e-06,
+    "um": 1e-06,
+    "nmol/l": 1e-09,
+    "nm": 1e-09,
+    "pmol/l": 1e-12
+   }
+  },
+  "mass": {
+   "canonical": "g",
+   "factors": {
+    "kg": 1000.0,
+    "g": 1.0,
+    "mg": 0.001,
+    "ug": 1e-06,
+    "mcg": 1e-06,
+    "ng": 1e-09,
+    "pg": 1e-12,
+    "t": 1000000.0
+   }
+  },
+  "volume": {
+   "canonical": "L",
+   "factors": {
+    "l": 1.0,
+    "ml": 0.001,
+    "ul": 1e-06,
+    "mcl": 1e-06,
+    "cm3": 0.001,
+    "m3": 1000.0,
+    "dm3": 1.0
+   }
+  },
+  "length": {
+   "canonical": "m",
+   "factors": {
+    "km": 1000.0,
+    "m": 1.0,
+    "cm": 0.01,
+    "mm": 0.001,
+    "um": 1e-06,
+    "mcm": 1e-06,
+    "nm": 1e-09
+   }
+  },
+  "time": {
+   "canonical": "s",
+   "factors": {
+    "d": 86400.0,
+    "day": 86400.0,
+    "days": 86400.0,
+    "h": 3600.0,
+    "hr": 3600.0,
+    "hour": 3600.0,
+    "min": 60.0,
+    "minute": 60.0,
+    "s": 1.0,
+    "sec": 1.0,
+    "ms": 0.001
+   }
+  },
+  "pressure": {
+   "canonical": "Pa",
+   "factors": {
+    "pa": 1.0,
+    "kpa": 1000.0,
+    "mpa": 1000000.0,
+    "hpa": 100.0,
+    "mbar": 100.0,
+    "bar": 100000.0,
+    "atm": 101325.0,
+    "mmhg": 133.322,
+    "torr": 133.322,
+    "psi": 6894.76
+   }
+  },
+  "energy": {
+   "canonical": "J",
+   "factors": {
+    "j": 1.0,
+    "kj": 1000.0,
+    "mj": 1000000.0,
+    "cal": 4.184,
+    "kcal": 4184.0,
+    "wh": 3600.0,
+    "kwh": 3600000.0
+   }
+  },
+  "amount": {
+   "canonical": "mol",
+   "factors": {
+    "mol": 1.0,
+    "mmol": 0.001,
+    "umol": 1e-06,
+    "nmol": 1e-09
+   }
+  },
+  "dimensionless": {
+   "canonical": "%",
+   "factors": {
+    "%": 1.0,
+    "percent": 1.0,
+    "pct": 1.0,
+    "%vol": 1.0,
+    "%w/w": 1.0,
+    "%dw": 1.0,
+    "permille": 0.1,
+    "ppb": 1e-07,
+    "ppt": 1e-10,
+    "fraction": 100.0
+   }
+  },
+  "temperature": {
+   "canonical": "degC",
+   "affine": {
+    "degc": [
+     1.0,
+     0.0
+    ],
+    "c": [
+     1.0,
+     0.0
+    ],
+    "celsius": [
+     1.0,
+     0.0
+    ],
+    "degf": [
+     0.5555555555555556,
+     -17.77777777777778
+    ],
+    "f": [
+     0.5555555555555556,
+     -17.77777777777778
+    ],
+    "fahrenheit": [
+     0.5555555555555556,
+     -17.77777777777778
+    ],
+    "k": [
+     1.0,
+     -273.15
+    ],
+    "kelvin": [
+     1.0,
+     -273.15
+    ],
+    "degcelsius": [
+     1.0,
+     0.0
+    ]
+   }
+  }
+ },
+ "unit_notes": {
+  "ppm": "dimensionless by default; treated as mg/L (factor 1) only when the column dimension is concentration_mass in an aqueous matrix. Uncertainty is recorded either way.",
+  "mg/kg": "treated as mg/L only for dilute aqueous matrices (density 1); flagged as an assumption."
+ },
+ "date_formats": [
+  "%Y-%m-%dT%H:%M:%S%z",
+  "%Y-%m-%d %H:%M:%S",
+  "%Y-%m-%d",
+  "%Y/%m/%d",
+  "%d/%m/%Y",
+  "%d.%m.%Y",
+  "%d-%m-%Y",
+  "%m/%d/%Y",
+  "%Y%m%d",
+  "%d %b %Y",
+  "%b %d, %Y",
+  "%Y-%m",
+  "%H:%M:%S"
+ ],
+ "locale_note": "d/m/Y is assumed before m/d/Y; when both interpretations are valid the value is flagged U2 and escalated.",
+ "encodings": [
+  "utf-8-sig",
+  "utf-8",
+  "gb18030",
+  "big5",
+  "cp1252",
+  "latin-1"
+ ],
+ "mojibake_chars": "ÃÂÄÅÆÇÐÑØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ",
+ "contract_synonyms": {
+  "cleaned_table": [
+   "cleaned table",
+   "clean table",
+   "cleaned csv",
+   "clean data",
+   "cleaned dataset",
+   "cleaned data",
+   "output table",
+   "cleaned file"
+  ],
+  "cleaned_rows": [
+   "cleaned rows",
+   "preview",
+   "cleaned records",
+   "sample rows"
+  ],
+  "quality_report": [
+   "quality report",
+   "data quality",
+   "quality summary",
+   "cleaning report"
+  ],
+  "field_issues": [
+   "field issues",
+   "field level issues",
+   "column issues",
+   "problem list",
+   "field problem list"
+  ],
+  "stats": [
+   "stats",
+   "statistics",
+   "descriptive statistics",
+   "summary statistics"
+  ],
+  "duplicates": [
+   "duplicates",
+   "duplicate records",
+   "dedup",
+   "deduplication",
+   "duplicate groups"
+  ],
+  "missing": [
+   "missing",
+   "missing values",
+   "missingness",
+   "null report"
+  ],
+  "outliers": [
+   "outliers",
+   "anomalies",
+   "anomaly",
+   "abnormal values",
+   "range violations"
+  ],
+  "conversions": [
+   "conversions",
+   "transformations",
+   "unit conversion",
+   "format conversion",
+   "normalisation",
+   "change log"
+  ],
+  "unit_mapping": [
+   "unit mapping",
+   "unit map",
+   "units",
+   "unit table"
+  ],
+  "encoding": [
+   "encoding",
+   "charset",
+   "codec"
+  ],
+  "log": [
+   "log",
+   "run log",
+   "runlog"
+  ],
+  "assertions": [
+   "assertions",
+   "checks",
+   "self check",
+   "validation"
+  ],
+  "figures": [
+   "figures",
+   "charts",
+   "plots",
+   "images"
+  ],
+  "row_counts": [
+   "row counts",
+   "row accounting",
+   "counts"
+  ],
+  "data_dictionary": [
+   "data dictionary",
+   "dictionary",
+   "schema",
+   "field spec"
+  ],
+  "workorder_compliance": [
+   "workorder",
+   "work order",
+   "compliance",
+   "requirements"
+  ],
+  "sources": [
+   "sources",
+   "provenance",
+   "evidence"
+  ],
+  "uncertainty": [
+   "uncertainty",
+   "limitations",
+   "caveats"
+  ],
+  "pending_human": [
+   "pending human",
+   "human review",
+   "manual confirmation",
+   "open questions"
+  ],
+  "errors": [
+   "errors",
+   "failures"
+  ],
+  "degradations": [
+   "degradations",
+   "fallbacks"
+  ],
+  "changes": [
+   "changes",
+   "change records"
+  ],
+  "runtime": [
+   "runtime",
+   "environment"
+  ],
+  "status": [
+   "status",
+   "run status"
+  ],
+  "case_id": [
+   "case id",
+   "caseid",
+   "id"
+  ],
+  "artifacts": [
+   "artifacts",
+   "outputs",
+   "files",
+   "deliverables"
+  ]
+ },
+ "contract_stopwords": [
+  "the",
+  "of",
+  "and",
+  "or",
+  "for",
+  "a",
+  "an",
+  "to",
+  "in",
+  "on",
+  "with",
+  "table",
+  "data",
+  "file",
+  "path",
+  "json",
+  "csv",
+  "list",
+  "result",
+  "results",
+  "output",
+  "outputs",
+  "info",
+  "information",
+  "value"
+ ],
+ "workorder_patterns": {
+  "impute_request": "(填补|填充|插补|估值|impute|imputation|fill (?:in|missing)|estimate missing)",
+  "outlier_remove": "(剔除异常|删除异常|remove outlier|drop outlier|exclude outlier)",
+  "outlier_winsor": "(盖帽|缩尾|winsor|cap |capping|clip )",
+  "dedup_first": "(保留首次|保留第一条|first occurrence|keep first|retain first)",
+  "dedup_last": "(保留最后|最后一条|last occurrence|keep last)",
+  "no_impute": "(不要填补|不得填补|禁止填补|do not impute|no imputation|without imputation)"
+ },
+ "report_sections": [
+  "case_and_status",
+  "inputs_and_hashes",
+  "schema_and_dictionary",
+  "five_class_summary",
+  "field_level_issues",
+  "unit_and_encoding_maps",
+  "duplicates_and_key",
+  "outliers_and_criteria",
+  "downstream_readiness",
+  "consistency_checks",
+  "gaps_and_human_review",
+  "reproduction"
+ ],
+ "dict_header_keys": {
+  "name": [
+   "name",
+   "field",
+   "column",
+   "variable",
+   "var",
+   "col",
+   "column name",
+   "field name",
+   "参数",
+   "字段",
+   "变量",
+   "列名",
+   "parameter",
+   "metric",
+   "item",
+   "key name"
+  ],
+  "unit": [
+   "unit",
+   "units",
+   "单位",
+   "uom",
+   "unit of measure"
+  ],
+  "desc": [
+   "description",
+   "desc",
+   "definition",
+   "meaning",
+   "note",
+   "notes",
+   "说明",
+   "含义",
+   "备注",
+   "备注说明"
+  ],
+  "type": [
+   "type",
+   "dtype",
+   "datatype",
+   "data type",
+   "类型",
+   "数据类型",
+   "format"
+  ],
+  "min": [
+   "min",
+   "minimum",
+   "lower",
+   "low bound",
+   "下限",
+   "最小值"
+  ],
+  "max": [
+   "max",
+   "maximum",
+   "upper",
+   "high bound",
+   "上限",
+   "最大值"
+  ],
+  "range": [
+   "range",
+   "allowed range",
+   "bounds",
+   "plausible range",
+   "物理范围",
+   "合理范围",
+   "范围",
+   "取值"
+  ],
+  "missing": [
+   "missing",
+   "missing code",
+   "missing value",
+   "na code",
+   "缺失",
+   "缺失码",
+   "缺失值"
+  ],
+  "prec": [
+   "precision",
+   "decimals",
+   "decimal places",
+   "精度",
+   "小数位",
+   "有效位"
+  ],
+  "key": [
+   "key",
+   "primary key",
+   "pk",
+   "id field",
+   "主键",
+   "唯一键"
+  ]
+ },
+ "role_patterns": {
+  "key": "(^|[^a-z])(id|ids|no|num|code|key|uid|sample|specimen|subject|patient|site|plot|animal|batch|run|rep|replicate|well|plate)([^a-z]|$)",
+  "time": "(date|time|day|week|month|year|timestamp|datetime|日期|时间)",
+  "note": "id-like columns are keys only when they look identifier-like; exact greed is bounded by uniqueness check"
+ }
+}
