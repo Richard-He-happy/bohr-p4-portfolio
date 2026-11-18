@@ -1,0 +1,229 @@
+{
+ "pkg": {
+  "toprule": "booktabs",
+  "midrule": "booktabs",
+  "bottomrule": "booktabs",
+  "cmidrule": "booktabs",
+  "multirow": "multirow",
+  "makecell": "makecell",
+  "SI": "siunitx",
+  "sisetup": "siunitx",
+  "textcolor": "xcolor",
+  "cellcolor": "colortbl",
+  "rowcolor": "colortbl",
+  "hl": "soul",
+  "uline": "ulem",
+  "bm": "bm",
+  "mathbb": "amssymb",
+  "cref": "cleveref",
+  "todo": "todonotes",
+  "href": "hyperref",
+  "tabularx": "tabularx",
+  "longtable": "longtable",
+  "align": "amsmath",
+  "gather": "amsmath",
+  "cases": "amsmath",
+  "theorem": "amsthm",
+  "proof": "amsthm",
+  "tikzpicture": "tikz",
+  "axis": "pgfplots",
+  "algorithm": "algorithm",
+  "lstlisting": "listings",
+  "sidewaystable": "rotating",
+  "landscape": "lscape",
+  "multicols": "multicol"
+ },
+ "creq": {
+  "elsarticle": "title author abstract keyword maketitle",
+  "ieeetran": "title author abstract maketitle",
+  "revtex": "title author abstract maketitle",
+  "llncs": "title author abstract maketitle",
+  "acmart": "title author abstract maketitle",
+  "ctexart": "title author maketitle",
+  "amsart": "title author abstract maketitle",
+  "mdpi": "title author abstract keywords",
+  "article": "title author maketitle",
+  "report": "title author maketitle"
+ },
+ "contract_rules": [
+  [
+   "preserved.?facts|facts?.?preserv|verbatim.?facts",
+   "preserved_facts"
+  ],
+  [
+   "evidence|traceab|source.?map",
+   "evidence_map"
+  ],
+  [
+   "change|diff|revision|edit.?log|modif",
+   "change_log"
+  ],
+  [
+   "pending|uncertain|open.?issue|human|gap",
+   "pending_human"
+  ],
+  [
+   "compile|build|latex.?log|pass",
+   "compile"
+  ],
+  [
+   "error|exception",
+   "errors"
+  ],
+  [
+   "warn",
+   "warnings"
+  ],
+  [
+   "template|compliance|format|checklist",
+   "template_checks"
+  ],
+  [
+   "work.?order|receipt|requirement",
+   "workorder_receipt"
+  ],
+  [
+   "citation|reference|bibliograph|bib",
+   "citations"
+  ],
+  [
+   "table",
+   "tables"
+  ],
+  [
+   "figure|graphic|image",
+   "figures"
+  ],
+  [
+   "equation|formula|math",
+   "equations"
+  ],
+  [
+   "outline|structure|section|heading",
+   "outline"
+  ],
+  [
+   "status",
+   "status"
+  ],
+  [
+   "summary|narrative|report|abstract",
+   "summary"
+  ],
+  [
+   "manuscript|deliverable|draft|document|tex|artifact|output|file|path",
+   "deliverable"
+  ],
+  [
+   "count|metric|statistic",
+   "metrics"
+  ],
+  [
+   "source|material|input",
+   "sources"
+  ],
+  [
+   "note|remark|comment",
+   "notes"
+  ],
+  [
+   "language|locale",
+   "language"
+  ],
+  [
+   "title",
+   "title"
+  ],
+  [
+   "runtime|elapsed|timing|duration",
+   "runtime"
+  ],
+  [
+   "verif|audit",
+   "verification"
+  ]
+ ],
+ "error_classes": [
+  [
+   "not found",
+   "E01_MISSING_FILE",
+   "file/class/package absent: install it or fix the path"
+  ],
+  [
+   "Unicode character|inputenc Error|Invalid UTF-8|not set up",
+   "E14_ENCODING",
+   "encoding/engine mismatch: use xelatex + ctex"
+  ],
+  [
+   "Undefined control sequence",
+   "E02_UNDEFINED_MACRO",
+   "unknown macro: typo or missing package"
+  ],
+  [
+   "Missing \\$ inserted",
+   "E18_MATH_MODE",
+   "text-mode special or undelimited math: escape _ ^ & #"
+  ],
+  [
+   "Misplaced alignment tab",
+   "E07_ALIGN_TAB",
+   "`&` outside tabular: escape as \\&"
+  ],
+  [
+   "Missing number|Illegal unit",
+   "E17_ARGUMENT",
+   "bad length/argument: give a number with unit"
+  ],
+  [
+   "Runaway argument|Paragraph ended",
+   "E17_ARGUMENT",
+   "unclosed group: close that command's brace"
+  ],
+  [
+   "Extra \\}|Missing \\} inserted|Too many \\}",
+   "E05_BRACE",
+   "brace imbalance: match the reported brace"
+  ],
+  [
+   "ended by \\\\end|Environment .* undefined",
+   "E04_ENV",
+   "begin/end nesting: restore the order"
+  ],
+  [
+   "Package .* Error",
+   "E03_PACKAGE",
+   "package option/version error for this TeX distribution"
+  ],
+  [
+   "Citation .* undefined",
+   "E10_CITE",
+   "no bib entry for the key: add it, rerun bib"
+  ],
+  [
+   "Reference .* undefined",
+   "E09_REF",
+   "label missing or one more engine pass needed"
+  ],
+  [
+   "Font .* not found|Font shape|Missing character",
+   "E12_FONT",
+   "glyph unavailable: use a font present in the image"
+  ],
+  [
+   "Permission denied|can't write on file|cannot open",
+   "E13_PERMISSION",
+   "output not writable: build in the work dir"
+  ],
+  [
+   "TeX capacity exceeded",
+   "E16_CAPACITY",
+   "recursive macro or oversized structure"
+  ],
+  [
+   "Emergency stop",
+   "E99_EMERGENCY",
+   "TeX aborted: fix the first preceding error"
+  ]
+ ],
+ "rx_arg": "\\\\(?:label|ref|eqref|autoref|cref|Cref|pageref|nameref|cite[a-zA-Z]*|nocite|bibitem|url|href|includegraphics|input|include|bibliography|bibliographystyle|usepackage|documentclass|RequirePackage|graphicspath|newcommand|renewcommand|providecommand|lstinputlisting|lstinline|begin|end|SI|num|qty)\\*?(?:\\[[^\\]]*\\])*(?:\\{[^{}]*\\})?"
+}

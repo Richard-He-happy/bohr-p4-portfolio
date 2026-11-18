@@ -1,0 +1,450 @@
+{
+ "_note": "Reusable resources for methods-experiments-writer, version 1.3.0. spec: canonical|element|aliases (p=parameters s=setup d=datasets c=controls r=repro). qf/lb: canonical -> [zh, en]. t: section templates. fm: result field -> accepted contract keys.",
+ "spec": [
+  "lr|p|learningrate,learning_rate,lr,initlr,baselr,学习率,初始学习率",
+  "batch|p|batch,batchsize,batch_size,bs,批大小,批次大小,microbatchsize",
+  "epochs|p|epoch,epochs,numepochs,n_epochs,训练轮数,训练代数",
+  "wd|p|weightdecay,weight_decay,wd,l2,权重衰减",
+  "dropout|p|dropout,dropoutrate,droprate",
+  "optim|p|optimizer,optim,优化器",
+  "sched|p|scheduler,lrscheduler,调度器",
+  "warmup|p|warmup,warmupsteps,warmupratio",
+  "hidden|p|hidden,hiddensize,dmodel,d_model,dim",
+  "maxlen|p|maxlen,maxlength,seqlen,maxseqlength,max_seq_len",
+  "layers|p|layers,numlayers,nlayers,depth",
+  "momentum|p|momentum,beta1",
+  "accum|p|gradaccum,gradientaccumulation",
+  "device|s|device,gpu,gpus,cuda_visible_devices",
+  "hardware|s|hardware,gputype,gpumodel,machine,cluster,硬件,显卡",
+  "ngpu|s|numgpus,ngpu,gpunum",
+  "precision|s|precision,fp16,bf16,amp,mixedprecision",
+  "framework|s|framework,pytorch,tensorflow,jax",
+  "pkg|s|pkg,package,requires,pin",
+  "dataset|d|dataset,datasets,corpus,datasetname,数据集,name",
+  "datapath|d|datapath,data_dir,datasetpath,root",
+  "version|r|version,datasetversion,dataversion,release,版本",
+  "samples|d|numsamples,totalsize,size,numsample,样本数",
+  "split|d|split,splitratio,ratio,划分,划分比例",
+  "trainsize|d|trainsize,train_size,n_train,trainnum",
+  "valsize|d|valsize,val_size,n_val,devsize",
+  "testsize|d|testsize,test_size,n_test,testnum",
+  "preprocess|d|preprocess,preprocessing,预处理,tokenizer,normalize",
+  "seed|r|seed,seeds,randomseed,setseed,随机种子,种子",
+  "repeats|r|repeats,runs,numruns,trials,重复次数",
+  "commit|r|commit,gitsha,githash,revision,代码版本",
+  "baseline|c|baseline,baselines,comparedto,comparison,基线,model,models",
+  "budget|c|budget,samebudget,同预算"
+ ],
+ "numkeys": [
+  "lr",
+  "batch",
+  "epochs",
+  "wd",
+  "dropout",
+  "warmup",
+  "hidden",
+  "maxlen",
+  "layers",
+  "momentum",
+  "accum",
+  "ngpu",
+  "samples",
+  "trainsize",
+  "valsize",
+  "testsize",
+  "seed",
+  "repeats"
+ ],
+ "spacey": [
+  "hardware",
+  "dataset",
+  "preprocess",
+  "optim",
+  "sched",
+  "baseline",
+  "datapath",
+  "framework",
+  "pkg"
+ ],
+ "qf": {
+  "lr": [
+   "训练与评测使用的学习率是多少？",
+   "What learning rate was used?"
+  ],
+  "batch": [
+   "批大小（每卡或全局）是多少？",
+   "What batch size (per-device or global) was used?"
+  ],
+  "epochs": [
+   "训练轮数或总步数是多少？",
+   "How many epochs or steps were trained?"
+  ],
+  "seed": [
+   "随机种子是多少，是否对所有设置固定同一值？",
+   "What random seed was used, and was it fixed across settings?"
+  ],
+  "hardware": [
+   "训练与评测所用硬件型号与数量是什么？",
+   "Which hardware (model and count) was used for training and evaluation?"
+  ],
+  "framework": [
+   "框架与关键库的版本（如 PyTorch / CUDA）是什么？",
+   "What versions of the framework and key libraries were used?"
+  ],
+  "dataset": [
+   "数据集名称与版本是什么？",
+   "What is the dataset name and version?"
+  ],
+  "split": [
+   "训练/验证/测试的划分比例、随机方式与各子集规模是什么？",
+   "What are the split ratios, randomisation and subset sizes?"
+  ],
+  "preprocess": [
+   "数据预处理与分词/归一化步骤是什么？",
+   "Which preprocessing or normalisation steps were applied?"
+  ],
+  "baseline": [
+   "对照对象（基线及其版本）是哪些？",
+   "Which baselines were compared, and at which versions?"
+  ],
+  "metric": [
+   "使用哪些评价指标，如何汇总（单次/均值±标准差）？",
+   "Which metrics were used and how are they aggregated?"
+  ],
+  "budget": [
+   "各对照是否在同一硬件与算力预算下运行？",
+   "Were all controls run under identical hardware and budget?"
+  ],
+  "repeats": [
+   "每个设置重复运行了几次？",
+   "How many repetitions were run per configuration?"
+  ],
+  "command": [
+   "完整可复现的命令行是什么？",
+   "What is the full reproduction command line?"
+  ],
+  "commit": [
+   "代码版本或提交哈希是什么？",
+   "What is the code version or commit hash?"
+  ],
+  "version": [
+   "数据集版本标识是什么？",
+   "What is the dataset version identifier?"
+  ],
+  "steps": [
+   "方法步骤序列是什么？材料中未出现可识别的步骤记录。",
+   "What is the procedure? No step record was found in the materials."
+  ],
+  "limit": [
+   "结果在哪些具体条件下失效或不适用？",
+   "Under which specific conditions do the results fail or not apply?"
+  ]
+ },
+ "lb": {
+  "dataset": [
+   "数据集",
+   "dataset"
+  ],
+  "version": [
+   "版本",
+   "version"
+  ],
+  "samples": [
+   "规模",
+   "size"
+  ],
+  "split": [
+   "划分",
+   "split"
+  ],
+  "trainsize": [
+   "训练集",
+   "train size"
+  ],
+  "valsize": [
+   "验证集",
+   "val size"
+  ],
+  "testsize": [
+   "测试集",
+   "test size"
+  ],
+  "preprocess": [
+   "预处理",
+   "preprocessing"
+  ],
+  "datapath": [
+   "数据路径",
+   "data path"
+  ],
+  "device": [
+   "设备",
+   "device"
+  ],
+  "hardware": [
+   "硬件",
+   "hardware"
+  ],
+  "ngpu": [
+   "GPU 数",
+   "GPUs"
+  ],
+  "precision": [
+   "精度",
+   "precision"
+  ],
+  "framework": [
+   "框架",
+   "framework"
+  ],
+  "pkg": [
+   "依赖版本",
+   "pinned versions"
+  ],
+  "seed": [
+   "随机种子",
+   "seed"
+  ],
+  "repeats": [
+   "重复次数",
+   "repetitions"
+  ],
+  "commit": [
+   "代码版本",
+   "code version"
+  ],
+  "baseline": [
+   "对照",
+   "baseline"
+  ],
+  "budget": [
+   "预算",
+   "budget"
+  ],
+  "limit": [
+   "限制",
+   "limitation"
+  ],
+  "split_pct": [
+   "划分比例",
+   "split ratio"
+  ]
+ },
+ "t": {
+  "zh": {
+   "t": "方法与实验",
+   "note": "> 本草稿由 {m} 份材料中 {n} 条可定位记录组装；`[E#]` 指向附录 A 的文件、定位与原文，`〔Q#〕` 为材料缺失、需作者补充项（附录 B）；未在材料中出现的数值一律留空。",
+   "s": [
+    "总览",
+    "数据集与划分",
+    "方法步骤",
+    "实验设置",
+    "超参数",
+    "基线与对照",
+    "指标与统计",
+    "复现清单",
+    "局限与适用范围"
+   ],
+   "a": "附录 A 证据索引",
+   "b": "附录 B 待确认项",
+   "tbl": "表 1 参数表（正文取值与本表一致）",
+   "h": "参数|取值|作用对象|来源|定位",
+   "na": "本节要素在给定材料中未出现，见附录 B。",
+   "lead": "本节覆盖 {c} 类要素、{n} 条记录，尚未覆盖 {g} 项。",
+   "ia": "编号|文件|定位|原文片段",
+   "ib": "编号|要素|需确认内容|依据",
+   "ord": "步骤顺序取自材料中的显式步骤标记；无标记时退回代码执行顺序。",
+   "noord": "材料中未出现完整的步骤序列，需作者补充每步的输入、操作、输出与判定条件。",
+   "absent": "材料未出现",
+   "tpl": "# {title}\n\n{note}\n\n## 1 {s0}\n\n{lead}\n\n## 2 {s1}\n\n{datasets}\n\n## 3 {s2}\n\n{steps}\n\n{ord}\n\n## 4 {s3}\n\n{setup}\n\n## 5 {s4}\n\n{params}\n\n## 6 {s5}\n\n{controls}\n\n## 7 {s6}\n\n{metrics}\n\n## 8 {s7}\n\n{repro}\n\n## 9 {s8}\n\n{limits}\n\n## {a}\n\n{ia}\n{evrows}\n\n## {b}\n\n{ib}\n{gaprows}\n"
+  },
+  "en": {
+   "t": "Methods and Experimental Setup",
+   "note": "> Assembled from {m} materials ({n} located records). `[E#]` resolves in Appendix A to file, locator and verbatim quote; `[Q#]` marks values absent from the materials (Appendix B). No number outside the materials is filled in.",
+   "s": [
+    "Overview",
+    "Datasets and splits",
+    "Procedure",
+    "Experimental setup",
+    "Hyperparameters",
+    "Baselines and controls",
+    "Metrics and statistics",
+    "Reproducibility checklist",
+    "Limitations and scope"
+   ],
+   "a": "Appendix A: evidence index",
+   "b": "Appendix B: items to confirm",
+   "tbl": "Table 1. Parameter table (values in the text match this table)",
+   "h": "Parameter|Value|Scope|Source|Locator",
+   "na": "Not present in the supplied materials; see Appendix B.",
+   "lead": "{c} element classes and {n} records covered; {g} items still missing.",
+   "ia": "ID|File|Locator|Verbatim quote",
+   "ib": "ID|Element|Item to confirm|Basis",
+   "ord": "Step order follows explicit step markers in the materials; falls back to code execution order.",
+   "noord": "The materials contain no complete procedure; the author must add inputs, operations, outputs and decision rules for each step.",
+   "absent": "absent from materials",
+   "tpl": "# {title}\n\n{note}\n\n## 1 {s0}\n\n{lead}\n\n## 2 {s1}\n\n{datasets}\n\n## 3 {s2}\n\n{steps}\n\n{ord}\n\n## 4 {s3}\n\n{setup}\n\n## 5 {s4}\n\n{params}\n\n## 6 {s5}\n\n{controls}\n\n## 7 {s6}\n\n{metrics}\n\n## 8 {s7}\n\n{repro}\n\n## 9 {s8}\n\n{limits}\n\n## {a}\n\n{ia}\n{evrows}\n\n## {b}\n\n{ib}\n{gaprows}\n"
+  }
+ },
+ "fm": {
+  "manuscript": [
+   "methodssection",
+   "methodsection",
+   "sectiontext",
+   "deliverable",
+   "mainoutput",
+   "content",
+   "draft",
+   "text",
+   "section",
+   "methodsparagraph"
+  ],
+  "manuscript_path": [
+   "manuscriptpath",
+   "outputpath",
+   "deliverablepath",
+   "artifactpath",
+   "file",
+   "path"
+  ],
+  "preserved_facts": [
+   "preservedfacts",
+   "facts",
+   "keyfacts",
+   "numbers",
+   "preserved"
+  ],
+  "evidence_map": [
+   "evidencemap",
+   "evidence",
+   "claims",
+   "citations",
+   "sourcesmap",
+   "provenance"
+  ],
+  "change_log": [
+   "changelog",
+   "changes",
+   "revisions",
+   "edits",
+   "modifications",
+   "diffs"
+  ],
+  "parameter_table": [
+   "parametertable",
+   "params",
+   "hyperparameters",
+   "parameters",
+   "paramtable"
+  ],
+  "dataset_summary": [
+   "datasetsummary",
+   "datasets",
+   "data",
+   "splits",
+   "splitinfo"
+  ],
+  "reproducibility_checklist": [
+   "reproducibilitychecklist",
+   "reproducibility",
+   "repro",
+   "reprochecklist"
+  ],
+  "limitations": [
+   "limitations",
+   "limitation"
+  ],
+  "pending_human": [
+   "pendinghuman",
+   "openquestions",
+   "questions",
+   "todos",
+   "confirmations"
+  ],
+  "uncertainty": [
+   "uncertainty",
+   "uncertainties",
+   "caveats"
+  ],
+  "sources": [
+   "sources",
+   "sourcefiles",
+   "inputs"
+  ],
+  "status": [
+   "status",
+   "runstatus"
+  ],
+  "case_id": [
+   "caseid"
+  ],
+  "outputs": [
+   "outputs",
+   "artifacts",
+   "files",
+   "outputslist"
+  ],
+  "errors": [
+   "errors",
+   "failures"
+  ],
+  "degradations": [
+   "degradations",
+   "warnings",
+   "degraded"
+  ],
+  "runtime": [
+   "runtime",
+   "runinfo"
+  ],
+  "checks": [
+   "checks",
+   "selfcheck",
+   "compliance",
+   "qa",
+   "verification"
+  ],
+  "element_coverage": [
+   "coverage",
+   "elementcoverage"
+  ],
+  "procedure": [
+   "steps",
+   "procedure",
+   "methodsteps"
+  ],
+  "workorder_report": [
+   "workorderreport",
+   "workorder",
+   "editworkorder"
+  ],
+  "word_count": [
+   "wordcount",
+   "words"
+  ],
+  "language": [
+   "language",
+   "lang"
+  ],
+  "task_summary": [
+   "summary",
+   "tasksummary",
+   "instruction"
+  ],
+  "controls": [
+   "controls",
+   "comparisons",
+   "baselines"
+  ],
+  "metrics": [
+   "metric",
+   "metrics"
+  ],
+  "derived_counts": [
+   "derivedcounts",
+   "counters",
+   "counts",
+   "statistics"
+  ]
+ }
+}
