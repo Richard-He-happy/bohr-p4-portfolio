@@ -1,0 +1,880 @@
+{
+ "version": "1.0.0",
+ "facets": [
+  [
+   "fact_check",
+   "事实与数值一致性"
+  ],
+  [
+   "citation_support",
+   "引用与论断支持"
+  ],
+  [
+   "method_design",
+   "方法设计与可复现性"
+  ],
+  [
+   "statistics_report",
+   "统计报告完整性"
+  ],
+  [
+   "argument_chain",
+   "论证链与逻辑一致性"
+  ],
+  [
+   "academic_norms",
+   "学术规范与可发表性"
+  ]
+ ],
+ "sections": {
+  "heading": "^\\s*(?:\\d+(?:\\.\\d+)*[\\.\\)]?\\s*)?(abstract|summary|摘\\s*要|introduction|background|引\\s*言|前\\s*言|materials?\\s+and\\s+methods?|methods?|methodology|方\\s*法|材料与方法|results?|findings|结\\s*果|discussion|讨\\s*论|conclusions?|结\\s*论|limitations?|局\\s*限|references?|bibliography|参考文献|acknowledg\\w*|致\\s*谢|funding|基\\s*金|资助|data\\s+availability|数据可用性|conflicts?\\s+of\\s+interest|competing\\s+interests|利益冲突|ethic\\w*|伦理|author\\s+contributions?|作者贡献|supplementary)\\b",
+  "map": [
+   [
+    "abstract",
+    "abstract|summary|摘要"
+   ],
+   [
+    "introduction",
+    "introduction|background|引言|前言"
+   ],
+   [
+    "methods",
+    "method|方法|材料与方法"
+   ],
+   [
+    "results",
+    "result|findings|结果"
+   ],
+   [
+    "discussion",
+    "discussion|讨论"
+   ],
+   [
+    "conclusion",
+    "conclusion|结论"
+   ],
+   [
+    "references",
+    "reference|bibliograph|参考文献|文献"
+   ],
+   [
+    "limitations",
+    "limitation|局限"
+   ],
+   [
+    "ethics",
+    "ethic|伦理"
+   ],
+   [
+    "data",
+    "data availability|数据可用性"
+   ],
+   [
+    "coi",
+    "conflict|competing|利益冲突"
+   ],
+   [
+    "funding",
+    "funding|基金|资助"
+   ]
+  ]
+ },
+ "rules": [
+  {
+   "id": "ST-01",
+   "facet": "statistics_report",
+   "item": "p 值被报告为 0",
+   "sev": "major",
+   "basis": "error",
+   "match": "\\bp\\s*[=＝]\\s*0?\\.0+(?![1-9])",
+   "why": "p 值不可能精确等于 0；把小于 0.001 的结果写成 0，读者无法复核实际显著性水平。",
+   "fix": "改报精确值（如 p = 0.0004）或写作 p < 0.001，并补检验名称与统计量。"
+  },
+  {
+   "id": "ST-02",
+   "facet": "statistics_report",
+   "item": "p 值未附检验方法",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\bp\\s*[<>=＜＝]\\s*0?\\.\\d+",
+   "gate": {
+    "sentence_absent": [
+     "t-?test|anova|chi-?squared?|χ|mann-?whitney|wilcoxon|kruskal|fisher|log-?rank|regression|mixed[- ]effects?|gee|\\bglm\\b|检验|方差分析|卡方"
+    ]
+   },
+   "why": "报告了 p 值但同句未说明所用检验，读者无法判断统计前提与比较结构。",
+   "fix": "在方法或结果处写明检验名称、单双侧与多重比较校正方式。"
+  },
+  {
+   "id": "ST-03",
+   "facet": "statistics_report",
+   "item": "显著性主张缺少统计量",
+   "sev_if": {
+    "inferential": "major"
+   },
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\bstatistically\\s+significan\\w*|\\bsignificant(?:ly)?\\b|显著",
+   "gate": {
+    "sentence_absent": [
+     "\\bp\\s*[<=>＜＝]\\s*0?\\.\\d|\\d\\.\\d+\\s*(?:\\+/-|±)|95\\s*%\\s*(?:ci|confidence|置信)"
+    ]
+   },
+   "why": "以“显著”判断差异但同句没有 p 值、区间或效应量，该主张无法复核。",
+   "fix": "补 p 值/效应量与对应样本量；若仅描述性差异，改用“差异较小”等非显著性表述。"
+  },
+  {
+   "id": "ST-04",
+   "facet": "statistics_report",
+   "item": "± 数值未说明离散度含义",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\d+(?:\\.\\d+)?\\s*(?:±|\\+/-)\\s*\\d+(?:\\.\\d+)?",
+   "gate": {
+    "sentence_absent": [
+     "\\b(?:sd|sem|s\\.d\\.|s\\.e\\.|s\\.e\\.m\\.)\\b|standard deviation|standard error|标准差|标准误|interquartile|iqr"
+    ]
+   },
+   "why": "均值±数值未标明是标准差、标准误还是区间，三者含义与可解释性差别很大。",
+   "fix": "在表注与首次出现处明确 mean ± SD（或 SEM、95% CI），并全文统一。"
+  },
+  {
+   "id": "ST-05",
+   "facet": "statistics_report",
+   "item": "相关分析缺效应量",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\bcorrelat(?:ed|ion|ions)?\\b|相关系数|相关性",
+   "gate": {
+    "sentence_absent": [
+     "\\br\\s*=|\\brho\\b|R2|R²|pearson|spearman|kendall|effect size|效应量"
+    ]
+   },
+   "why": "描述了相关关系但没有给出相关系数或效应量，关联强度与方向不可核。",
+   "fix": "补 r（或 ρ、R²）、样本量与 p 值，并说明所用相关方法。"
+  },
+  {
+   "id": "ST-06",
+   "facet": "statistics_report",
+   "item": "百分比超出 0-100 范围",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "(?<![\\d.])([1-9]\\d{2,})\\s*%",
+   "gate": {
+    "numeric_gt": {
+     "group": 1,
+     "threshold": 100
+    }
+   },
+   "why": "出现大于 100% 的百分比；若为构成比则不可能，若为增幅则缺基线说明。",
+   "fix": "核对计算口径；构成比应≤100%，增幅改写为“较基线增加 X%”。"
+  },
+  {
+   "id": "CT-05",
+   "facet": "citation_support",
+   "item": "外部论断无引文标记",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "studies have (?:shown|demonstrated|reported)|it is (?:well[- ])?known that|previous (?:studies|work)|研究表明|已有研究|众所周知",
+   "gate": {
+    "sentence_absent": [
+     "\\[\\s*\\d|\\b(?:19|20)\\d{2}[a-z]?\\s*[)）]|et al"
+    ]
+   },
+   "why": "转述他人研究结论但本句没有引文标记，来源无法核对。",
+   "fix": "补具体文献编号或作者-年份；若无对应文献，改写为本研究的直接观察。"
+  },
+  {
+   "id": "CT-06",
+   "facet": "citation_support",
+   "item": "引用年份晚于当前",
+   "sev": "major",
+   "basis": "error",
+   "match": "[（(]\\s*(20[3-9]\\d)\\s*[)）]",
+   "why": "引文年份晚于当前年份，引用信息很可能有误。",
+   "fix": "核对原始文献年份与卷期；无法确认时删除该引用或标注 in press。"
+  },
+  {
+   "id": "MD-03",
+   "facet": "method_design",
+   "item": "随机化方法未说明",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\brandom(?:ly|ised|ized|ization|isation)\\b|随机(?:分组|分配)?",
+   "gate": {
+    "sentence_absent": [
+     "random (?:number|table|sequence)|computer[- ]generated|sealed|block(?:ed)? random|stratified|urn|抽签|随机数字表|区组"
+    ]
+   },
+   "why": "称随机分组但未说明随机序列如何产生，无法评估选择偏倚。",
+   "fix": "补随机化方法与分配隐藏（如计算机生成序列、密封信封、区组大小）。"
+  },
+  {
+   "id": "MD-04",
+   "facet": "method_design",
+   "item": "盲法层级未说明",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\bblind(?:ed|ing)?\\b|盲法|双盲|单盲",
+   "gate": {
+    "sentence_absent": [
+     "single[- ]blind|double[- ]blind|triple[- ]blind|open[- ]label|单盲|双盲|三盲|盲态"
+    ]
+   },
+   "why": "提到盲法但没有说明盲的层级与被盲对象，无法判断偏倚控制程度。",
+   "fix": "写明单盲/双盲及被盲对象（受试者、实施者、评价者），并说明盲法是否被检验。"
+  },
+  {
+   "id": "AR-01",
+   "facet": "argument_chain",
+   "item": "观察性数据使用因果措辞",
+   "sev": "major",
+   "basis": "insufficient_evidence",
+   "match": "\\b(?:caus(?:e|es|ed|al|ality)|leads? to|results? in|gives? rise to|drives?)\\b|导致|引起|造成|决定了",
+   "gate": {
+    "profile": {
+     "observational": true,
+     "trial": false
+    }
+   },
+   "why": "以因果措辞描述关联结果，但设计为观察性/相关性分析，结论强度超出数据支持范围。",
+   "fix": "改为“与…相关/关联”；若要作因果解释，需说明额外假设、混杂控制与敏感性分析。"
+  },
+  {
+   "id": "AR-02",
+   "facet": "argument_chain",
+   "item": "超出证据的确定性措辞",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "match": "\\b(?:prove[sd]?|conclusively|definitively|unambiguous(?:ly)?)\\b|证实了|证明了|充分证明",
+   "gate": {
+    "sentence_absent": [
+     "\\bp\\s*[<=>]\\s*0?\\.\\d|95\\s*%\\s*ci|置信区间"
+    ]
+   },
+   "why": "使用“证明/确证”类措辞但同句无统计支持，表述强于证据。",
+   "fix": "改为“支持/提示/与…一致”，并在讨论中限定适用范围与外部效度。"
+  },
+  {
+   "id": "FC-03",
+   "facet": "fact_check",
+   "item": "残留占位符或未完成标记",
+   "sev": "major",
+   "basis": "error",
+   "match": "\\bTODO\\b|\\bTBD\\b|\\bXXX\\b|lorem ipsum|待补(?:充)?|待定|此处插入|\\[insert|图\\s*X|表\\s*X",
+   "why": "稿件保留占位符/未完成标记，说明该处内容尚未定稿，投稿前必须清除。",
+   "fix": "补齐内容并删除标记；交付前全文检索 TODO/TBD/XX/待补。"
+  },
+  {
+   "id": "AN-07",
+   "facet": "academic_norms",
+   "item": "标题过长",
+   "sev": "info",
+   "basis": "suggestion",
+   "match": "\\S",
+   "gate": {
+    "first_sentence": true,
+    "min_tokens": 28
+   },
+   "why": "标题词数过多，检索与引用时可读性下降（多数期刊建议不超过 20–25 词）。",
+   "fix": "压缩标题，保留研究对象、方法与关键结果三要素。"
+  }
+ ],
+ "computed": {
+  "CT-01": {
+   "facet": "citation_support",
+   "item": "引用编号超出文献表范围",
+   "sev": "major",
+   "basis": "error",
+   "why": "正文引用编号大于文献表最大编号，该引用指向不存在的文献条目。",
+   "fix": "核对编号并补齐对应文献，或重排文后文献表后同步更新正文。"
+  },
+  "CT-02": {
+   "facet": "citation_support",
+   "item": "有正文引用但缺参考文献列表",
+   "sev": "major",
+   "basis": "error",
+   "why": "正文出现数字引用标记，但全文未检出参考文献列表，所有引用均无法核对来源。",
+   "fix": "补齐参考文献列表并与正文编号一一对应；或改用作者-年份制并统一。"
+  },
+  "CT-03": {
+   "facet": "citation_support",
+   "item": "文献表条目未被正文引用",
+   "sev": "info",
+   "basis": "suggestion",
+   "why": "文献表中存在正文从未引用的编号（或编号不连续），条目与正文不对应。",
+   "fix": "按目标期刊格式统一编号；删除未引用条目或补上引用位置。"
+  },
+  "FC-01": {
+   "facet": "fact_check",
+   "item": "样本量报告前后不一致",
+   "sev": "major",
+   "basis": "insufficient_evidence",
+   "why": "全文出现多个不同的样本量数值，摘要/方法/结果可能不一致，读者无法确定分析样本。",
+   "fix": "逐处核对各阶段样本量（纳入、分配、分析），用流程图与统一表述对应。"
+  },
+  "FC-02": {
+   "facet": "fact_check",
+   "item": "正文引用的图表编号不存在",
+   "sev": "major",
+   "basis": "error",
+   "why": "正文引用了超出图注编号范围的图表，读者无法找到对应图表。",
+   "fix": "核对图表编号并补齐缺失图注；重排后同步更新正文全部引用。"
+  },
+  "FC-04": {
+   "facet": "fact_check",
+   "item": "摘要数值在正文中找不到对应",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "why": "摘要出现的数值在正文中未检索到同值，可能是摘要与正文版本不同步。",
+   "fix": "逐项核对摘要与正文的样本量、效应量与 p 值，统一后重写摘要。"
+  }
+ },
+ "specs": [
+  {
+   "id": "CT-07",
+   "facet": "citation_support",
+   "item": "参考文献重复著录",
+   "sev": "minor",
+   "basis": "error",
+   "applies": {
+    "stat_true": [
+     "ref_dups"
+    ]
+   },
+   "fire": {
+    "stat_true": "ref_dups"
+   },
+   "quote": "\\[\\s*\\d",
+   "why": "文献表出现重复条目（前 90 字符归一化后相同），会造成编号与引用混乱。",
+   "fix": "合并重复条目并统一编号；核对该文献是否被重复引用。",
+   "count": "重复条目数"
+  },
+  {
+   "id": "CT-08",
+   "facet": "citation_support",
+   "item": "文献条目缺出版年",
+   "sev": "minor",
+   "basis": "error",
+   "applies": {
+    "stat_true": [
+     "ref_no_year"
+    ]
+   },
+   "fire": {
+    "stat_true": "ref_no_year"
+   },
+   "quote": "(?:19|20)\\d{2}",
+   "why": "部分参考文献缺少出版年份，无法判断时效性，也不符合多数期刊格式。",
+   "fix": "逐条补齐年份、卷期与页码；无法补齐的条目应替换为可核对文献。",
+   "count": "缺年份条目数"
+  },
+  {
+   "id": "CT-09",
+   "facet": "citation_support",
+   "item": "DOI 格式可疑",
+   "sev": "minor",
+   "basis": "error",
+   "applies": {
+    "stat_true": [
+     "ref_doi_bad"
+    ]
+   },
+   "fire": {
+    "stat_true": "ref_doi_bad"
+   },
+   "quote": "10\\.\\d{4,9}",
+   "why": "DOI 字符串不符合 10.xxxx/... 规范或长度异常，可能抄录有误。",
+   "fix": "逐条在 doi.org 核对并修正；无法解析的 DOI 建议删除或换用可访问链接。",
+   "count": "可疑 DOI 数"
+  },
+  {
+   "id": "FC-05",
+   "facet": "fact_check",
+   "item": "图注存在但正文未引用",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "stat_true": [
+     "caption_uncited"
+    ]
+   },
+   "fire": {
+    "stat_true": "caption_uncited"
+   },
+   "quote": "^\\s*(?:Fig|Table|图|表)\\s*\\d",
+   "why": "该图表在正文中没有被引用，属编排规范问题（多数期刊要求正文引述每个图表）。",
+   "fix": "在结果部分补一句引用（如“见图 N”），或合并/删除该图表。",
+   "count": "未被正文引用的图注编号"
+  },
+  {
+   "id": "MD-01",
+   "facet": "method_design",
+   "item": "缺少对照或比较组说明",
+   "sev": "major",
+   "basis": "insufficient_evidence",
+   "applies": {
+    "profile": [
+     "empirical"
+    ]
+   },
+   "fire": {
+    "profile_false": "control"
+   },
+   "quote": "compar|versus|\\bvs\\.?\\b|与.{0,12}比较|差异",
+   "why": "全文未检出对照/比较组（control、placebo、sham、vehicle、baseline）描述，而研究含组间比较结论。",
+   "fix": "补对照设置（类型、来源、匹配方式）；若为单臂设计，需在局限中说明并下调结论强度。",
+   "need": "未识别为实证研究，未检查对照设置",
+   "count": "对照关键词命中=0"
+  },
+  {
+   "id": "MD-02",
+   "facet": "method_design",
+   "item": "未报告样本量",
+   "sev": "major",
+   "basis": "error",
+   "applies": {
+    "profile": [
+     "empirical"
+    ]
+   },
+   "fire": {
+    "stat_false": "n_values"
+   },
+   "quote": "sample|specimen|participant|样本|例",
+   "why": "全文未给出任何样本量（n=...），定量结果缺少可解释的分母。",
+   "fix": "在方法与每个图表中给出各组的 n，并说明剔除与缺失情况。",
+   "need": "未识别为实证研究，未检查样本量",
+   "count": "n 值命中=0"
+  },
+  {
+   "id": "MD-05",
+   "facet": "method_design",
+   "item": "重复次数/独立实验未说明",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "applies": {
+    "profile": [
+     "invitro"
+    ]
+   },
+   "fire": {
+    "profile_false": "replicate"
+   },
+   "quote": "cell|assay|培养|细胞",
+   "why": "体外实验未说明重复次数与独立实验批次，结果稳定性无法评估。",
+   "fix": "写明每组重复数（技术重复/生物学重复）与独立实验次数（如 n=3）。",
+   "need": "未识别为体外/细胞实验"
+  },
+  {
+   "id": "MD-06",
+   "facet": "method_design",
+   "item": "缺统计分析方法的整体说明",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "applies": {
+    "profile": [
+     "inferential"
+    ]
+   },
+   "fire": {
+    "profile_false": "stat_methods"
+   },
+   "quote": "p\\s*[<=]",
+   "why": "结果中报告了 p 值，但全文未见统计分析方法段落（软件、检验、校正）。",
+   "fix": "补统计分析小节：软件与版本、检验选择依据、多重比较校正、缺失值处理。",
+   "need": "全文未检出 p 值，未检查统计分析声明"
+  },
+  {
+   "id": "MD-07",
+   "facet": "method_design",
+   "item": "缺纳入/排除标准",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "applies": {
+    "profile": [
+     "human"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "inclusion|exclusion|eligible|纳入标准|排除标准"
+    ]
+   },
+   "quote": "patient|participant|受试者|患者",
+   "why": "人体研究未给出纳入与排除标准，样本代表性与可重复性无法评价。",
+   "fix": "补纳入/排除标准、招募方式与时间范围。",
+   "need": "未识别为人体研究"
+  },
+  {
+   "id": "MD-08",
+   "facet": "method_design",
+   "item": "缺样本量估算依据",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "empirical",
+     "inferential"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "sample size (?:calculation|estimation)|power analysis|样本量估(?:算|计)|功效分析"
+    ]
+   },
+   "quote": "\\bn\\s*=|sample|样本",
+   "why": "未见样本量估算或功效说明，读者无法判断研究是否有能力检出目标效应。",
+   "fix": "补样本量估算（主要结局、预期效应量、α、power、脱落率）。"
+  },
+  {
+   "id": "AR-03",
+   "facet": "argument_chain",
+   "item": "缺局限性讨论",
+   "sev": "minor",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "full"
+    ],
+    "section": [
+     "discussion"
+    ]
+   },
+   "fire": {
+    "profile_false": "limitations"
+   },
+   "quote": "discussion|讨论|in conclusion|综上",
+   "why": "全文未见局限性说明，读者无法判断结论边界与偏倚风险。",
+   "fix": "补局限性段落：样本量、设计（观察性/单中心）、测量误差、外推范围。",
+   "need": "未检出讨论段或篇幅过短"
+  },
+  {
+   "id": "AR-06",
+   "facet": "argument_chain",
+   "item": "讨论未与既有文献对照",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "section": [
+     "discussion"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "consistent with|in contrast|compared (?:with|to) (?:previous|earlier)|与.{0,10}(?:一致|不同)|既往研究"
+    ]
+   },
+   "quote": "discussion|讨论|our (?:findings|results)",
+   "why": "讨论段未把本研究结果与既有文献比较，机制解释与差异原因缺位。",
+   "fix": "补与关键文献的一致/矛盾点及可能原因（人群、剂量、方法差异）。",
+   "need": "未检出讨论段"
+  },
+  {
+   "id": "AN-02",
+   "facet": "academic_norms",
+   "item": "缺少方法章节",
+   "sev": "major",
+   "basis": "error",
+   "applies": {
+    "section": [
+     "results"
+    ]
+   },
+   "fire": {
+    "absent_section": "methods"
+   },
+   "quote": "method|方法",
+   "why": "稿件缺少核心章节，结构不完整，审稿人无法定位该部分内容。",
+   "fix": "补写该章节；若因体例（如 letter）省略，需在投稿信中说明。",
+   "need": "未检出足够章节标题（或为节选），未做章节齐备性检查"
+  },
+  {
+   "id": "AN-02b",
+   "facet": "academic_norms",
+   "item": "缺少结果章节",
+   "sev": "major",
+   "basis": "error",
+   "applies": {
+    "section": [
+     "methods"
+    ]
+   },
+   "fire": {
+    "absent_section": "results"
+   },
+   "quote": "result|结果",
+   "why": "稿件缺少核心章节，结构不完整，审稿人无法定位该部分内容。",
+   "fix": "补写该章节；若因体例（如 letter）省略，需在投稿信中说明。",
+   "need": "未检出足够章节标题（或为节选），未做章节齐备性检查"
+  },
+  {
+   "id": "AN-02c",
+   "facet": "academic_norms",
+   "item": "缺少讨论章节",
+   "sev": "minor",
+   "basis": "error",
+   "applies": {
+    "section": [
+     "results"
+    ]
+   },
+   "fire": {
+    "absent_section": "discussion"
+   },
+   "quote": "discussion|讨论",
+   "why": "稿件缺少讨论章节，结果与既有文献的关系和机制解释无处安放。",
+   "fix": "补讨论章节：主要发现、与文献比较、机制、局限。",
+   "need": "未检出足够章节标题（或为节选），未做章节齐备性检查"
+  },
+  {
+   "id": "AN-02d",
+   "facet": "academic_norms",
+   "item": "缺少结论章节",
+   "sev": "minor",
+   "basis": "error",
+   "applies": {
+    "section": [
+     "discussion"
+    ]
+   },
+   "fire": {
+    "absent_section": "conclusion"
+   },
+   "quote": "conclusion|结论",
+   "why": "稿件缺少独立结论，读者无法确认作者最终主张及其边界。",
+   "fix": "补 2–4 句结论，逐条回应引言提出的问题。",
+   "need": "未检出足够章节标题（或为节选），未做章节齐备性检查"
+  },
+  {
+   "id": "AN-03",
+   "facet": "academic_norms",
+   "item": "伦理审查/批准声明缺失",
+   "sev": "major",
+   "basis": "error",
+   "applies": {
+    "profile": [
+     "human",
+     "animal"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "ethic|irb|institutional review|伦理|审查批件|approval number"
+    ]
+   },
+   "quote": "ethic|consent|patient|受试者",
+   "why": "涉及人或动物的研究未见伦理审查声明，属投稿硬性缺项。",
+   "fix": "补伦理委员会名称、批准号与批件日期；若无审批需说明依据。",
+   "count": "伦理关键词命中=0"
+  },
+  {
+   "id": "AN-04",
+   "facet": "academic_norms",
+   "item": "知情同意声明缺失",
+   "sev": "minor",
+   "basis": "error",
+   "applies": {
+    "profile": [
+     "human"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "informed consent|consent|知情同意"
+    ]
+   },
+   "quote": "consent|patient|受试者",
+   "why": "人体研究未见知情同意说明，读者无法判断受试者保护是否合规。",
+   "fix": "补“所有受试者签署知情同意”及豁免情况说明。",
+   "count": "知情同意关键词命中=0"
+  },
+  {
+   "id": "AN-05",
+   "facet": "academic_norms",
+   "item": "数据可用性声明缺失",
+   "sev": "minor",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "empirical"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "data availability|availability of data|数据可用性|数据获取"
+    ]
+   },
+   "quote": "data|数据",
+   "why": "未见数据可用性声明，数据可获取性不明，影响可复现性判断。",
+   "fix": "补数据可用性声明（仓库 DOI、受限访问条件或应要求提供）。",
+   "count": "数据可用性关键词命中=0"
+  },
+  {
+   "id": "AN-06",
+   "facet": "academic_norms",
+   "item": "利益冲突声明缺失",
+   "sev": "minor",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "empirical"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "conflicts? of interest|competing interests|利益冲突|无利益"
+    ]
+   },
+   "quote": "conflict|interest|利益",
+   "why": "未见利益冲突声明，属常规投稿要件缺项。",
+   "fix": "补“作者声明无利益冲突”或具体资助方角色。",
+   "count": "利益冲突关键词命中=0"
+  },
+  {
+   "id": "AN-10",
+   "facet": "academic_norms",
+   "item": "资助信息缺失",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "empirical"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "funding|financial support|grant|基金|资助"
+    ]
+   },
+   "quote": "fund|grant|基金|资助",
+   "why": "未见资助来源说明；有资助时需披露资助方在设计与分析中的角色。",
+   "fix": "补基金名称与编号，并说明资助方是否参与研究过程。",
+   "count": "资助关键词命中=0"
+  },
+  {
+   "id": "AN-11",
+   "facet": "academic_norms",
+   "item": "作者贡献声明缺失",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "empirical"
+    ]
+   },
+   "fire": {
+    "absent": [
+     "author contributions?|contributorship|作者贡献"
+    ]
+   },
+   "quote": "contribut|作者",
+   "why": "未见作者贡献声明，署名责任与贡献分工不明（多数期刊强制要求）。",
+   "fix": "按 CRediT 分类补作者贡献，并声明通讯作者与保证人。",
+   "count": "作者贡献关键词命中=0"
+  },
+  {
+   "id": "AN-08",
+   "facet": "academic_norms",
+   "item": "摘要长度异常",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "stat_true": [
+     "abstract"
+    ]
+   },
+   "fire": {
+    "count_not_between": {
+     "stat": "abstract_len",
+     "lo": 120,
+     "hi": 420
+    }
+   },
+   "quote": "abstract|摘要",
+   "why": "摘要长度偏离常见 150–350 词区间，可能缺要素或超限。",
+   "fix": "按目标期刊字数压缩/扩充；确保含目的、方法、主要结果（带数值）、结论。",
+   "need": "未检出摘要段"
+  },
+  {
+   "id": "AN-09",
+   "facet": "academic_norms",
+   "item": "关键词数量不合常规",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "stat_true": [
+     "keywords"
+    ]
+   },
+   "fire": {
+    "list_count": {
+     "stat": "keywords",
+     "lo": 3,
+     "hi": 8,
+     "split": "[;,；，、]"
+    }
+   },
+   "quote": "key\\s?words?|关键词",
+   "why": "关键词数量偏离多数期刊要求的 3–8 个，影响检索命中。",
+   "fix": "调整为 3–8 个，覆盖对象、方法、关键变量，避免与标题完全重复。",
+   "need": "未检出关键词字段"
+  },
+  {
+   "id": "ST-07",
+   "facet": "statistics_report",
+   "item": "只报 p 值不报区间估计",
+   "sev": "info",
+   "basis": "suggestion",
+   "applies": {
+    "profile": [
+     "inferential"
+    ]
+   },
+   "fire": {
+    "stat_false": "ci_present"
+   },
+   "quote": "p\\s*[<=]",
+   "why": "结果仅以 p 值判断，未报告效应量与 95% 置信区间，无法判断实际重要性。",
+   "fix": "补主要结局的效应量与 95% CI；p 值作为辅助而非唯一判据。",
+   "need": "全文未检出 p 值"
+  },
+  {
+   "id": "ST-09",
+   "facet": "statistics_report",
+   "item": "均值缺少离散度",
+   "sev": "minor",
+   "basis": "insufficient_evidence",
+   "applies": {
+    "profile": [
+     "empirical"
+    ],
+    "stat_true": [
+     "mean_present"
+    ]
+   },
+   "fire": {
+    "none_stat": [
+     "sd_present",
+     "sd_symbol"
+    ]
+   },
+   "quote": "mean|median|均值|中位数",
+   "why": "报告了均值/中位数但全文无 SD、SEM、IQR 或区间，读者无法判断变异程度。",
+   "fix": "每个集中趋势量配套离散度统计量，并在表注标明定义。",
+   "need": "未识别为报告集中趋势的实证结果"
+  }
+ ],
+ "profile": {
+  "human": "clinical trial|cohort study|informed consent|questionnaire|(?:patients?|participants?|subjects?|volunteers?)\\s+were|受试者|患者|临床研究|知情同意|伦理",
+  "animal": "\\b(mice|mouse|rats?|rabbits?|zebrafish|piglets?)\\b|小鼠|大鼠|家兔|斑马鱼",
+  "invitro": "\\b(cells?|cell line|assay|culture|in vitro|organoid)\\b|细胞|体外|培养",
+  "trial": "randomi[sz]ed (?:controlled )?trial|\\brct\\b|随机对照",
+  "empirical_text": "\\b(we|our)\\b[^.]{0,90}\\b(measured|recorded|collected|tested|treated|analy[sz]ed|assayed|sampled|surveyed|conducted)|experiment|实验|样本|specimens?",
+  "control": "\\bcontrols?\\b|control group|对照组|阴性对照|阳性对照|placebo|sham|vehicle",
+  "replicate": "replicat|重复|三次独立|n\\s*=\\s*3",
+  "stat_methods": "statistical analysis|statistics|data were analy|spss|r version|graphpad|prism|stata|统计(?:学)?分析",
+  "limitations": "limitation|局限|不足",
+  "observational": "cross[- ]sectional|cohort study|observational|retrospective|case[- ]control|survey|questionnaire|横断面|回顾性|观察性|队列"
+ }
+}

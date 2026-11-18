@@ -1,0 +1,776 @@
+{
+ "version": "1.0.0",
+ "skill": "review-fact-check",
+ "note": "Rule catalog, pattern DSL and report labels for review-fact-check. Deterministic rules only; contains no case-specific answers.",
+ "catalog": {
+  "citation.number_out_of_range": {
+   "kind": "academic_norm",
+   "severity": "major",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "正文引用编号 [{k}] 在参考文献表中不存在（表内共 {n} 条）",
+   "fix_zh": "改为正确的条目编号，或补入该文献完整条目；不得保留悬空编号",
+   "en": "In-text citation [{k}] has no matching entry ({n} entries in the reference list)",
+   "fix_en": "Point to the correct entry or add the missing reference; a dangling number must not remain"
+  },
+  "citation.uncited_reference": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "参考文献条目 {k} 未在正文中被引用",
+   "fix_zh": "补引或删除该条目；若为编号错位，需整体重排并逐条核对全文引用序列",
+   "en": "Reference entry {k} is never cited in the text",
+   "fix_en": "Cite it or delete it; if numbering is shifted, renumber and re-check every in-text citation"
+  },
+  "citation.entry_missing": {
+   "kind": "citation_support",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "文中引用作者“{a}”在参考文献表中无对应条目",
+   "fix_zh": "补入完整条目（作者、年份、标题、期刊/出处、DOI）或删除该处引用",
+   "en": "Citation to \"{a}\" has no matching reference-list entry",
+   "fix_en": "Add the full entry (authors, year, title, venue, DOI) or delete the citation"
+  },
+  "citation.year_mismatch": {
+   "kind": "citation_support",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "文中引用的年份 {y} 与条目年份 {ry} 不一致",
+   "fix_zh": "校正年份；若确为同作者不同年份文献，补充 a/b 年份后缀以便区分",
+   "en": "In-text year {y} conflicts with reference-list year {ry}",
+   "fix_en": "Correct the year; if two papers by the same author exist, add a/b suffixes"
+  },
+  "citation.duplicate_doi": {
+   "kind": "academic_norm",
+   "severity": "major",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "同一 DOI {doi} 在参考文献表中出现 {n} 次",
+   "fix_zh": "合并重复条目，并确认是否把同一文献误作两项证据",
+   "en": "DOI {doi} appears {n} times in the reference list",
+   "fix_en": "Merge duplicates and check whether one source was counted as two"
+  },
+  "citation.retracted_or_corrected": {
+   "kind": "citation_support",
+   "severity": "major",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "被引条目含撤稿/关注声明/更正字样，引用支持力存疑：{q}",
+   "fix_zh": "核验该文献当前出版状态与版本（出版方页面、撤稿数据库），必要时更换证据或在正文说明状态",
+   "en": "Cited entry carries a retraction / expression-of-concern / correction marker: {q}",
+   "fix_en": "Verify current publication status and version; replace the evidence or state the status in text"
+  },
+  "citation.preprint_status": {
+   "kind": "citation_support",
+   "severity": "minor",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "所引文献为预印本或未经同行评议的版本：{q}",
+   "fix_zh": "核验是否已有正式发表版本并改引正式版；只能引预印本时，正文须标注“preprint”并说明证据等级",
+   "en": "Cited work is a preprint / non-peer-reviewed version: {q}",
+   "fix_en": "Check for a peer-reviewed version and cite it; if only the preprint exists, label it in text"
+  },
+  "citation.review_supports_causal": {
+   "kind": "citation_support",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "以综述/荟萃分析 {q} 支撑因果性断言",
+   "fix_zh": "改引提供直接因果证据的原始研究，或把断言降级为相关性/综述层面的概括",
+   "en": "A review/meta-analysis {q} is used to support a causal claim",
+   "fix_en": "Cite primary causal evidence, or downgrade the claim to an associational statement"
+  },
+  "citation.uncited_assertion": {
+   "kind": "citation_support",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "陈述他人结论或既有事实但未给出来源：{q}",
+   "fix_zh": "补具体文献（作者+年份或编号）；无来源的事实性表述应删除或改写为本文观察",
+   "en": "Prior work or an established fact is asserted without a source: {q}",
+   "fix_en": "Add a specific citation, or rewrite as this study's own observation"
+  },
+  "stats.p_zero": {
+   "kind": "stats_report",
+   "severity": "major",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "p 值写作 {q}：精确概率不可能为 0",
+   "fix_zh": "改为 p < 0.001（或所用软件的最小精度），并同时给出检验统计量与自由度",
+   "en": "p-value reported as {q}; an exact probability cannot be zero",
+   "fix_en": "Report p < 0.001 (or the software's floor) together with the test statistic and df"
+  },
+  "stats.claim_without_test": {
+   "kind": "stats_report",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "声称“显著”但同句未给出检验统计量或 p 值：{q}",
+   "fix_zh": "补检验方法、统计量、自由度与 p 值；或改写为描述性表述",
+   "en": "Significance is claimed without a test statistic or p-value in the same sentence: {q}",
+   "fix_en": "Add test, statistic, df and p; or rewrite descriptively"
+  },
+  "stats.no_effect_size": {
+   "kind": "stats_report",
+   "severity": "minor",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "全文报告 p 值但未见效应量与置信区间，效应大小与精度无法判断",
+   "fix_zh": "补效应量（OR/HR/β/Cohen's d 等）与 95% CI，避免只依赖显著性",
+   "en": "p-values are reported but no effect size or confidence interval appears",
+   "fix_en": "Add effect sizes (OR/HR/beta/d) with 95% CI; do not rely on significance alone"
+  },
+  "stats.no_power_analysis": {
+   "kind": "stats_report",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "未见样本量估算或检验效能说明，统计结论的稳健性无法判断",
+   "fix_zh": "在方法中补样本量依据（效应量假设、α、power）或声明该分析为探索性",
+   "en": "No sample-size justification or power statement is given",
+   "fix_en": "Add sample-size rationale (effect size, alpha, power) or declare the analysis exploratory"
+  },
+  "stats.unnamed_dispersion": {
+   "kind": "stats_report",
+   "severity": "minor",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "使用 ± 表示离散度但未说明是 SD 还是 SEM：{q}",
+   "fix_zh": "在方法或图注中明确 SD/SEM 并统一全文写法",
+   "en": "Dispersion is shown with a plus-minus sign but SD vs SEM is never defined: {q}",
+   "fix_en": "Define SD or SEM in Methods or caption and keep it consistent"
+  },
+  "stats.trend_misuse": {
+   "kind": "stats_report",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "以“趋势/边缘显著”表述未达阈值的比较：{q}",
+   "fix_zh": "如实报告 p 值与效应区间，不用趋势性措辞替代预设检验",
+   "en": "A non-significant comparison is described as a trend: {q}",
+   "fix_en": "Report the actual p-value and interval instead of trend wording"
+  },
+  "stats.boundary_p": {
+   "kind": "stats_report",
+   "severity": "info",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "p 值落在 0.05 判定边界上，结论对阈值口径敏感：{q}",
+   "fix_zh": "同时报告精确 p 值、单双侧与预设 α，并说明边界值的处理方式",
+   "en": "p sits exactly on the 0.05 decision boundary, so the verdict depends on the convention: {q}",
+   "fix_en": "Report the exact p, one/two-sided choice and pre-specified alpha"
+  },
+  "stats.missing_n": {
+   "kind": "stats_report",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "报告均值±离散度但未给出样本量，比较的分母不明：{q}",
+   "fix_zh": "在句中或图注补各组 n；缺失时不得比较组间差异",
+   "en": "Mean and dispersion are reported without the sample size: {q}",
+   "fix_en": "Give n per group in text or caption"
+  },
+  "method.randomization_undescribed": {
+   "kind": "method_design",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "声称随机化但未描述随机序列生成与分配隐藏：{q}",
+   "fix_zh": "补随机化方法（序列生成、分配隐藏、分层因素）；非随机设计请删除该措辞",
+   "en": "Randomization is claimed but sequence generation and allocation concealment are not described: {q}",
+   "fix_en": "Describe sequence generation, allocation concealment and stratification, or drop the wording"
+  },
+  "method.no_control": {
+   "kind": "method_design",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "存在组间比较结论，但方法部分未见对照/比较组描述：{q}",
+   "fix_zh": "补对照组的设置、来源与处理方式；无对照时不得给出比较性结论",
+   "en": "Between-group claims appear, but no control/comparator is described in Methods: {q}",
+   "fix_en": "Describe the comparator; without one, comparative conclusions are not supported"
+  },
+  "method.extrapolation": {
+   "kind": "method_design",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "证据以体外/细胞水平为主，结论却外推到临床：{q}",
+   "fix_zh": "把结论限定在体外/细胞水平，或补充体内与临床验证并说明外推限度",
+   "en": "Evidence is in vitro/cell-level while the conclusion extends to patients: {q}",
+   "fix_en": "Restrict the conclusion or add in vivo/clinical validation and state the limits of extrapolation"
+  },
+  "method.no_criteria": {
+   "kind": "method_design",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "研究对象纳入/排除标准缺失，样本代表性无法评估：{q}",
+   "fix_zh": "补纳入/排除标准、招募方式与时间范围",
+   "en": "Inclusion/exclusion criteria for the study objects are missing: {q}",
+   "fix_en": "Add eligibility criteria, recruitment route and period"
+  },
+  "argument.causal_overreach": {
+   "kind": "argument_chain",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "相关性或观察性证据被表述为因果结论：{q}",
+   "fix_zh": "改为关联性表述（associated with / may contribute），并说明混杂控制与替代解释",
+   "en": "Correlational or observational evidence is stated as a causal conclusion: {q}",
+   "fix_en": "Use associational wording and address confounding and alternative explanations"
+  },
+  "argument.review_as_evidence": {
+   "kind": "argument_chain",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "以综述性表述支撑确定性断言：{q}",
+   "fix_zh": "改引原始研究，或把断言降级为综述层面的概括",
+   "en": "A review-level statement carries a definitive assertion: {q}",
+   "fix_en": "Cite primary studies or soften the assertion"
+  },
+  "argument.novelty_claim": {
+   "kind": "argument_chain",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "首次性/新颖性断言缺少检索证据：{q}",
+   "fix_zh": "补检索策略、数据库与时间范围作为依据，或弱化为“据我们所知”",
+   "en": "A first-ever/novelty claim lacks a documented literature search: {q}",
+   "fix_en": "Document the search strategy and dates, or soften to 'to our knowledge'"
+  },
+  "argument.absolute_wording": {
+   "kind": "argument_chain",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "结论使用绝对化措辞，与单研究证据强度不匹配：{q}",
+   "fix_zh": "限定范围与条件（在何种样本、剂量、时程下成立）",
+   "en": "The conclusion uses absolute wording that a single study cannot support: {q}",
+   "fix_en": "Bound the claim by sample, dose, duration and conditions"
+  },
+  "norm.missing_section": {
+   "kind": "academic_norm",
+   "severity": "major",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "缺少可识别的“{a}”章节标题，结构不完整",
+   "fix_zh": "补该章节；若输入为节选，需在报告与结果状态中说明审查范围",
+   "en": "A \"{a}\" section cannot be identified; the structure is incomplete",
+   "fix_en": "Add the section, or state in the report that only an excerpt was reviewed"
+  },
+  "norm.no_ethics_statement": {
+   "kind": "academic_norm",
+   "severity": "major",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "涉及人体或动物研究对象，但未见伦理审批与知情同意声明：{q}",
+   "fix_zh": "补伦理委员会名称、批准号与知情同意说明；确无伦理要求的，写明依据",
+   "en": "Human or animal subjects are involved but no ethics approval/consent statement appears: {q}",
+   "fix_en": "Add committee name, approval number and consent statement, or justify the exemption"
+  },
+  "norm.no_coi": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "缺少利益冲突声明",
+   "fix_zh": "补利益冲突声明；无冲突时明确写“无利益冲突”",
+   "en": "No conflict-of-interest statement",
+   "fix_en": "Add one; state 'none declared' when applicable"
+  },
+  "norm.no_data_availability": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "缺少数据与代码可用性声明",
+   "fix_zh": "补数据/代码可用性声明（仓库链接、登记号或获取条件）",
+   "en": "No data/code availability statement",
+   "fix_en": "Add availability details (repository, accession, or access conditions)"
+  },
+  "norm.no_funding": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "缺少基金资助声明",
+   "fix_zh": "补资助来源与项目编号；无资助时注明“无”",
+   "en": "No funding statement",
+   "fix_en": "Add funder and grant number, or state 'none'"
+  },
+  "norm.no_author_contrib": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "缺少作者贡献声明",
+   "fix_zh": "补作者贡献（构思、实验、分析、写作）与通讯作者信息",
+   "en": "No author-contribution statement",
+   "fix_en": "Add contribution roles and corresponding author"
+  },
+  "norm.no_reporting_guideline": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "属需要规范报告的研究类型，但未声明遵循的报告指南：{q}",
+   "fix_zh": "声明遵循 CONSORT/PRISMA/STROBE/ARRIVE 等清单并附检查表",
+   "en": "This study type requires a reporting guideline, but none is declared: {q}",
+   "fix_en": "Declare the applicable guideline and attach the checklist"
+  },
+  "norm.supplement_missing": {
+   "kind": "academic_norm",
+   "severity": "minor",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "正文引用补充材料，但输入中未见补充文件：{q}",
+   "fix_zh": "提供补充材料，或在报告中说明未随稿提交、相关结论暂不可核",
+   "en": "Supplementary material is cited but no supplementary file was supplied: {q}",
+   "fix_en": "Provide the supplement or record that the related claims stay unverified"
+  },
+  "norm.few_references": {
+   "kind": "academic_norm",
+   "severity": "info",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "参考文献仅 {n} 条，证据基础偏薄",
+   "fix_zh": "补关键原始研究，尤其是方法与对照依据的来源",
+   "en": "Only {n} references; the evidence base is thin",
+   "fix_en": "Add key primary studies, especially for methods and comparators"
+  },
+  "norm.self_citation": {
+   "kind": "academic_norm",
+   "severity": "info",
+   "certainty": "likely",
+   "status": "issue",
+   "zh": "疑似自引比例较高（{n}/{m} 条条目含 we/our 表述）",
+   "fix_zh": "核对自引必要性，补充独立来源证据",
+   "en": "Self-citation share may be high ({n}/{m})",
+   "fix_en": "Check necessity of self-citations and add independent evidence"
+  },
+  "norm.duplicate_publication_cue": {
+   "kind": "academic_norm",
+   "severity": "info",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "出现可能指向重复发表或拆分发表的表述：{q}",
+   "fix_zh": "核对该文与既有发表的关系，必要时说明数据重叠与引用关系",
+   "en": "Wording suggesting duplicate or salami publication: {q}",
+   "fix_en": "Clarify relationship to prior publications and data overlap"
+  },
+  "fact.percent_fraction_mismatch": {
+   "kind": "fact_check",
+   "severity": "major",
+   "certainty": "confirmed",
+   "status": "issue",
+   "zh": "百分比与分数不一致：{pct}% 与 {a}/{b}（应为 {real}%）",
+   "fix_zh": "按 {a}/{b} 重算百分比，并同步正文、表格与图注三处",
+   "en": "Percentage and fraction disagree: {pct}% vs {a}/{b} (= {real}%)",
+   "fix_en": "Recompute from {a}/{b} and propagate to text, table and caption"
+  },
+  "fact.sample_size_mismatch": {
+   "kind": "fact_check",
+   "severity": "major",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "摘要样本量 {a} 与正文 {b} 无交集，可能不一致",
+   "fix_zh": "核对真实样本量，统一摘要、方法与表 1 中的 N",
+   "en": "Abstract sample size {a} and body {b} do not overlap",
+   "fix_en": "Confirm the true N and make abstract, methods and Table 1 agree"
+  },
+  "fact.abstract_number_absent": {
+   "kind": "fact_check",
+   "severity": "major",
+   "certainty": "needs_human",
+   "status": "pending_human",
+   "zh": "摘要中的数字在正文找不到对应表述：{q}",
+   "fix_zh": "核对该数字的来源，补正文与表格中的支撑，或修正摘要",
+   "en": "A number in the abstract has no counterpart in the body: {q}",
+   "fix_en": "Trace the number to the body/table or correct the abstract"
+  }
+ },
+ "patterns": [
+  {
+   "rule": "citation.uncited_assertion",
+   "regex": "(?i)(?:studies have shown|previous (?:studies|work|research)|it is (?:well )?known|has been reported|reported that|研究表明|已有研究)[^.\\n]{0,150}",
+   "not_near": "\\[\\d|(?:19|20)\\d{2}",
+   "window": 320
+  },
+  {
+   "rule": "method.randomization_undescribed",
+   "section": "methods",
+   "regex": "(?i)randomi[sz][^.\\n]{0,110}",
+   "not_near": "(?i)(random (?:number|sequence)|computer-generated|allocation concealment|sealed envelope|permuted block|stratified|随机数|分层)",
+   "window": 280
+  },
+  {
+   "rule": "method.no_control",
+   "regex": "(?i)(compared (?:with|to)|versus|higher than|lower than|组间差异|与.{0,8}相比)",
+   "absent_in_section": {
+    "section": "methods",
+    "regex": "(?i)(control|comparator|vehicle|sham|placebo|对照)"
+   },
+   "window": 110
+  },
+  {
+   "rule": "method.extrapolation",
+   "section": "conclusion",
+   "regex": "(?i)[^.\\n]{0,110}(patients|clinical|treat|therapy|患者|临床)[^.\\n]{0,110}",
+   "require_doc": "(?i)(in vitro|cell line|细胞系|体外)"
+  },
+  {
+   "rule": "method.no_criteria",
+   "section": "methods",
+   "regex": "(?i)(participants|patients|subjects|cohort|患者|受试者)[^.\\n]{0,90}",
+   "not_near": "(?i)(inclusion|exclusion|eligib|纳入|排除)",
+   "window": 800,
+   "first_only": true
+  },
+  {
+   "rule": "stats.p_zero",
+   "regex": "(?i)\\bp\\s*[=<>≤≥]\\s*(?:0?\\.0{2,}|0(?:\\.0+)?)(?![\\d.])"
+  },
+  {
+   "rule": "stats.claim_without_test",
+   "regex": "(?i)[^.\\n]{0,140}significant(?:ly)?[^.\\n]{0,140}",
+   "not_near": "(?i)(p\\s*[=<>≤≥]|confidence interval|\\bCI\\b|χ2|chi-?square|odds ratio|hazard ratio|t\\s*[-=]|F\\s*\\()",
+   "window": 130
+  },
+  {
+   "rule": "stats.no_effect_size",
+   "regex": "(?i)\\bp\\s*[=<>≤≥]\\s*[\\d.]+",
+   "absent_doc": "(?i)(95\\s*%\\s*(?:CI|confidence)|confidence interval|可信区间)",
+   "first_only": true
+  },
+  {
+   "rule": "stats.no_power_analysis",
+   "regex": "(?i)\\bp\\s*[=<>≤≥]\\s*[\\d.]+",
+   "absent_doc": "(?i)(sample size|power analys|power calculation|功效|检验效能)",
+   "first_only": true
+  },
+  {
+   "rule": "stats.trend_misuse",
+   "regex": "(?i)(trend (?:toward|towards)|borderline significan|marginally significan|接近显著|边缘显著)[^.\\n]{0,80}"
+  },
+  {
+   "rule": "stats.boundary_p",
+   "regex": "(?i)\\bp\\s*=\\s*0?\\.0?5(?![\\d.])[^.\\n]{0,60}"
+  },
+  {
+   "rule": "stats.missing_n",
+   "regex": "(?i)\\bmeans?\\b[^.\\n]{0,60}±[^.\\n]{0,30}",
+   "not_near": "(?i)\\bn\\s*=\\s*\\d",
+   "window": 120
+  },
+  {
+   "rule": "stats.unnamed_dispersion",
+   "regex": "(?i)[^.\\n]{0,60}±[^.\\n]{0,40}",
+   "not_near": "(?i)\\b(?:SD|SEM|s\\.d\\.|s\\.e\\.|standard deviation|standard error|标准差)\\b",
+   "window": 400,
+   "first_only": true
+  },
+  {
+   "rule": "argument.causal_overreach",
+   "regex": "(?i)\\b(?:prove[sdn]?|proven|demonstrates? that|establishes? that|causes?|causal(?:ly)?|confirms? that|证实|证明|导致)\\b[^.\\n]{0,90}",
+   "require_near": "(?i)(correlat|associat|tendenc|suggest|may|could|相关|关联)",
+   "window": 150
+  },
+  {
+   "rule": "argument.review_as_evidence",
+   "regex": "(?i)\\b(?:prove[sdn]?|demonstrates? that|confirms? that|establishes? that|证实|证明)\\b[^.\\n]{0,80}",
+   "require_near": "(?i)(\\breview\\b|meta-analysis|systematic review|综述)",
+   "window": 140
+  },
+  {
+   "rule": "argument.novelty_claim",
+   "regex": "(?i)\\b(first (?:time|report|demonstration)|unprecedented|for the first time|首次|前所未有)\\b[^.\\n]{0,90}"
+  },
+  {
+   "rule": "argument.absolute_wording",
+   "section": "conclusion",
+   "regex": "(?i)\\b(?:always|never|invariably|in all (?:cases|patients|settings))\\b[^.\\n]{0,70}"
+  },
+  {
+   "rule": "norm.no_ethics_statement",
+   "doc_level": true,
+   "require_doc": "(?i)(patients?|participants?|volunteers?|human subjects?|informed consent|患者|受试者|志愿者|\\bmice\\b|\\brats?\\b|小鼠|大鼠)",
+   "absent_doc": "(?i)(ethic|irb|institutional review board|approval (?:number|no)|declaration of helsinki|伦理|批准号)"
+  },
+  {
+   "rule": "norm.no_coi",
+   "doc_level": true,
+   "absent_doc": "(?i)(conflict of interest|competing interest|利益冲突|声明无冲突)"
+  },
+  {
+   "rule": "norm.no_data_availability",
+   "doc_level": true,
+   "absent_doc": "(?i)(data availability|data and code|available (?:from|on) (?:reasonable )?request|数据可用|数据获取)"
+  },
+  {
+   "rule": "norm.no_funding",
+   "doc_level": true,
+   "absent_doc": "(?i)(funding|funded by|grant (?:no|number|from)|基金|资助)"
+  },
+  {
+   "rule": "norm.no_author_contrib",
+   "doc_level": true,
+   "absent_doc": "(?i)(author contribution|CRediT|作者贡献)"
+  },
+  {
+   "rule": "norm.no_reporting_guideline",
+   "regex": "(?i)(randomi[sz]ed controlled|\\bRCT\\b|systematic review|meta-analysis)",
+   "absent_doc": "(?i)(CONSORT|PRISMA|STROBE|ARRIVE|reporting guideline|报告规范)",
+   "first_only": true
+  },
+  {
+   "rule": "norm.duplicate_publication_cue",
+   "regex": "(?i)(?:previously published|part of a (?:larger|previous) study|companion (?:paper|article)|salami|已发表[^。]{0,20})[^.\\n]{0,80}"
+  }
+ ],
+ "labels": {
+  "zh": {
+   "title": "审查报告：引用与事实核验",
+   "case": "案例",
+   "status": "状态",
+   "generated": "生成时间",
+   "s_summary": "1. 概要",
+   "sum_line": "文档 {n} 份、可读字符 {c}；问题 {t} 条（阻断 {M} / 建议 {m} / 提示 {i}），待人工复核 {p} 条。",
+   "cat": "类别",
+   "checks": "已执行检查",
+   "found": "发现问题",
+   "kind_fact_check": "事实与数值核验",
+   "kind_citation_support": "引用支持",
+   "kind_method_design": "方法设计",
+   "kind_stats_report": "统计报告",
+   "kind_argument_chain": "论证链",
+   "kind_academic_norm": "学术规范",
+   "s_scope": "2. 审查范围与方法",
+   "s_findings": "3. 问题清单",
+   "loc": "位置",
+   "quote": "原文",
+   "finding": "判定",
+   "rule": "规则",
+   "fix": "建议",
+   "section": "章节",
+   "sev_major": "阻断性问题",
+   "sev_minor": "建议性问题",
+   "sev_info": "提示与规范",
+   "s_matrix": "4. 引用支持矩阵（语义判定留空）",
+   "matrix_note": "共 {n} 组“句子→引用”配对。verdict 取 full/partial/none/undetermined，须对照被引文献原文判定；本表不预设结论，未判定的进入待复核。",
+   "pair": "配对",
+   "citation": "引用",
+   "s_numeric": "5. 事实与数值核查计数",
+   "s_pending": "6. 待人工复核",
+   "s_unchecked": "7. 未检查项与输入缺口",
+   "none": "无。",
+   "s_runtime": "8. 运行、降级与错误",
+   "s_repro": "9. 复现命令",
+   "s_statement": "10. 声明",
+   "statement": "本报告由 Skill 在当前输入上实际运行生成，不含预制答案。未联网检索，被引文献自身的结论未在本平台核验，涉及外部文献内容的判断一律进入待复核。",
+   "method": "执行两阶段流程：(1) 确定性规则扫描，覆盖引用编号与条目一致性、数值与百分比自洽、统计报告完整性、方法设计、论证链、学术规范六类；(2) 引用支持矩阵，把“结论句→被引条目”逐组列出，判定字段留空并标注所需证据。所有条目均附定位串与逐字原文，可回查。",
+   "pending_item": "{id} — {why}；需要：{need}"
+  },
+  "en": {
+   "title": "Review report: citation & fact verification",
+   "case": "Case",
+   "status": "Status",
+   "generated": "Generated",
+   "s_summary": "1. Summary",
+   "sum_line": "{n} document(s), {c} characters; {t} finding(s) (major {M} / minor {m} / info {i}), {p} pending human review.",
+   "cat": "Category",
+   "checks": "Checks run",
+   "found": "Findings",
+   "kind_fact_check": "Fact & numbers",
+   "kind_citation_support": "Citation support",
+   "kind_method_design": "Method design",
+   "kind_stats_report": "Statistical reporting",
+   "kind_argument_chain": "Argument chain",
+   "kind_academic_norm": "Academic norms",
+   "s_scope": "2. Scope and method",
+   "s_findings": "3. Findings",
+   "loc": "Locator",
+   "quote": "Quote",
+   "finding": "Finding",
+   "rule": "Rule",
+   "fix": "Suggested fix",
+   "section": "Section",
+   "sev_major": "Blocking issues",
+   "sev_minor": "Suggested issues",
+   "sev_info": "Info & norms",
+   "s_matrix": "4. Citation-support matrix (verdicts open)",
+   "matrix_note": "{n} claim-citation pairs. Verdict in full/partial/none/undetermined must be decided against the cited source; nothing is presupposed, undecided pairs go to pending review.",
+   "pair": "Pair",
+   "citation": "Citation",
+   "s_numeric": "5. Numeric checks (counts)",
+   "s_pending": "6. Pending human review",
+   "s_unchecked": "7. Unchecked items and input gaps",
+   "none": "none.",
+   "s_runtime": "8. Runtime, degradations, errors",
+   "s_repro": "9. Reproduce",
+   "s_statement": "10. Statement",
+   "statement": "Produced by running the Skill on the supplied input; no prepared answers. No network access was used, so statements about the content of cited works stay pending human review.",
+   "method": "Two passes: (1) deterministic rule scan over citation numbering/entries, numeric and percentage consistency, statistical reporting, method design, argument chain and academic norms; (2) a citation-support matrix pairing each claim sentence with its cited entry, leaving verdicts explicitly open. Every item carries a locator and a verbatim quote.",
+   "pending_item": "{id} — {why}; needs: {need}"
+  }
+ },
+ "pattern_dsl": {
+  "regex": "required; searched in the section slice or whole document",
+  "section": "optional canonical section name (abstract/methods/results/discussion/conclusion/...)",
+  "window": "character radius for the near-guards (default 200)",
+  "require_near": "regex that MUST match within +/-window of the match",
+  "not_near": "regex that MUST NOT match within +/-window (false-positive control)",
+  "require_doc": "regex that must match somewhere in the document, else the rule is skipped",
+  "absent_doc": "regex that must be absent from the whole document, else the rule is skipped",
+  "absent_in_section": {
+   "section": "name",
+   "regex": "skip if this regex matches in that section"
+  },
+  "first_only": "emit only the first hit",
+  "doc_level": "emit once for the document (document-level absence checks)"
+ },
+ "sections": [
+  [
+   "abstract",
+   "abstract|摘要"
+  ],
+  [
+   "introduction",
+   "introduction|background|引言|前言"
+  ],
+  [
+   "methods",
+   "method|materials and methods|方法|实验"
+  ],
+  [
+   "results",
+   "results?\\b|结果"
+  ],
+  [
+   "discussion",
+   "discussion|讨论"
+  ],
+  [
+   "conclusion",
+   "conclusion|结论|总结"
+  ],
+  [
+   "references",
+   "references|bibliography|参考文献|文献"
+  ],
+  [
+   "funding",
+   "funding|grant|基金|资助"
+  ],
+  [
+   "coi",
+   "conflict of interest|competing interest|利益冲突"
+  ],
+  [
+   "data",
+   "data availability|数据可用"
+  ],
+  [
+   "ethics",
+   "ethic|irb|institutional review|伦理"
+  ],
+  [
+   "author_contrib",
+   "author contribution|作者贡献"
+  ],
+  [
+   "ack",
+   "acknowledg|致谢"
+  ],
+  [
+   "supp",
+   "supplementary|补充材料"
+  ]
+ ],
+ "contract_rules": [
+  [
+   "case_?id",
+   "case_id"
+  ],
+  [
+   "csv",
+   "issues_csv_path"
+  ],
+  [
+   "(report|markdown|_md\\b)",
+   null
+  ],
+  [
+   "(issue|finding|problem|defect|violation|意见|问题|条目)",
+   "issues"
+  ],
+  [
+   "(citation|reference|cite|引用)",
+   "citation_support_matrix"
+  ],
+  [
+   "(evidence|locator|quote|证据)",
+   "evidence_index"
+  ],
+  [
+   "(summary|count|stat|metric|overview|coverage|统计|概要)",
+   "review_summary"
+  ],
+  [
+   "(pending|human|manual|待复核)",
+   "pending_human"
+  ],
+  [
+   "(uncertain|limitation|caveat|不确定|局限)",
+   "uncertainty"
+  ],
+  [
+   "(source|material|input_file|来源)",
+   "sources"
+  ],
+  [
+   "(status|state|状态)",
+   "status"
+  ],
+  [
+   "(error|错误)",
+   "errors"
+  ],
+  [
+   "(degrad|fallback|降级)",
+   "degradations"
+  ],
+  [
+   "(change|变更)",
+   "changes"
+  ],
+  [
+   "(runtime|elapsed|budget|运行)",
+   "runtime"
+  ]
+ ],
+ "csv_fields": [
+  "issue_id",
+  "kind",
+  "severity",
+  "certainty",
+  "status",
+  "locator",
+  "page",
+  "paragraph",
+  "quote",
+  "claim",
+  "rule_id",
+  "suggested_fix"
+ ],
+ "report": {
+  "zh": "# 审查报告：引用与事实核验\n\n**案例** `{case}` | **状态** `{status}` | **生成** {generated} | {skill} | 引用配对 {pairs} 组\n\n## 1. 概要\n\n{summary}\n\n| 类别 | 已执行检查 | 发现问题 |\n|---|---|---|\n{coverage}\n\n## 2. 审查范围与方法\n\n{sources}\n\n两阶段流程：(1) 确定性规则扫描，覆盖引用条目与编号一致性、数值与百分比自洽、统计报告完整性、方法设计、论证链、学术规范六类；(2) 引用支持矩阵，把\"结论句→被引条目\"逐组列出，判定字段留空并标注所需证据。未联网检索外部数据库，涉及被引文献内容与出版状态的判断一律进入待复核。\n\n## 3. 问题清单\n\n{findings}\n\n## 4. 引用支持矩阵（语义判定留空）\n\n共 {pairs} 组\"句子→引用\"配对。verdict ∈ full/partial/none/undetermined，须对照被引文献原文判定；本表不预设结论。\n\n| 配对 | 定位 | 引用 | verdict |\n|---|---|---|---|\n{matrix}\n\n## 5. 数值核查计数\n\n{numeric}\n\n## 6. 待人工复核\n\n{pending}\n\n## 7. 未检查项与输入缺口\n\n{unchecked}\n\n## 8. 运行、降级与错误\n\n{runtime}\n\n{degradations}\n\n{errors}\n\n## 9. 复现\n\n```bash\npython3 scripts/main.py --input /input --output /app/output\npython3 scripts/main.py --input /input --output /app/output --findings /app/work/findings.json\npython3 scripts/verify.py --input /input --output /app/output\n```\n\n## 10. 声明\n\n本报告由 Skill 在当前输入上实际运行生成，不含预制答案；材料缺失、无法判断与运行失败分别在\"未检查项\"\"待人工复核\"\"运行与错误\"中说明。",
+  "en": "# Review report: citation & fact verification\n\n**Case** `{case}` | **Status** `{status}` | **Generated** {generated} | {skill} | {pairs} citation pairs\n\n## 1. Summary\n\n{summary}\n\n| Category | Checks run | Findings |\n|---|---|---|\n{coverage}\n\n## 2. Scope and method\n\n{sources}\n\nTwo passes: (1) deterministic rules over citation entries and numbering, numeric/percentage consistency, statistical reporting, method design, argument chain and academic norms; (2) a citation-support matrix pairing each claim sentence with its cited entry, leaving support verdicts explicitly open. No external database was queried; anything about the content or publication status of cited works stays in pending human review.\n\n## 3. Findings\n\n{findings}\n\n## 4. Citation-support matrix (verdicts open)\n\n{pairs} claim-citation pairs. verdict in full/partial/none/undetermined must be decided against the cited source; nothing is presupposed.\n\n| Pair | Locator | Citation | verdict |\n|---|---|---|---|\n{matrix}\n\n## 5. Numeric checks (counts)\n\n{numeric}\n\n## 6. Pending human review\n\n{pending}\n\n## 7. Unchecked items and input gaps\n\n{unchecked}\n\n## 8. Runtime, degradations, errors\n\n{runtime}\n\n{degradations}\n\n{errors}\n\n## 9. Reproduce\n\n```bash\npython3 scripts/main.py --input /input --output /app/output\npython3 scripts/main.py --input /input --output /app/output --findings /app/work/findings.json\npython3 scripts/verify.py --input /input --output /app/output\n```\n\n## 10. Statement\n\nProduced by running the Skill on the supplied input; no prepared answers. Missing material, undecidable items and run failures are reported under \"Unchecked\", \"Pending human review\" and \"Runtime\" respectively.",
+  "issue_zh": "**{issue_id}** [{kind} / {severity} / {certainty}] · `{locator}` · 章节 {section}\n- 原文：{quote}\n- 判定：{claim}\n- 规则：`{rule_id}` · 状态：{status}\n- 建议：{suggested_fix}",
+  "issue_en": "**{issue_id}** [{kind} / {severity} / {certainty}] · `{locator}` · section {section}\n- quote: {quote}\n- finding: {claim}\n- rule: `{rule_id}` / {status}\n- fix: {suggested_fix}"
+ }
+}
