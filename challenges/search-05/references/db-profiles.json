@@ -1,0 +1,311 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-11-18",
+  "note": "Pairwise field mapping and merge policy for multi-database literature search. Paths are JSON-Pointer-like dotted paths understood by scripts/main.py dig(); '*' iterates a list, '[i]' indexes. A field's first non-empty path wins; no path matching -> generic synonym fallback -> null (missing, never guessed).",
+  "canonical_fields": {
+    "title": "string",
+    "authors": "array[{family,given,name}]",
+    "year": "int",
+    "venue": "string",
+    "volume": "string",
+    "issue": "string",
+    "pages": "string",
+    "doi": "string (normalised, lowercase, no resolver prefix)",
+    "pmid": "string",
+    "pmcid": "string (PMC########)",
+    "arxiv": "string",
+    "url": "string",
+    "type": "string (normalised genre)",
+    "publisher": "string",
+    "abstract": "string (plain text, tags stripped)",
+    "language": "string (ISO 639-1 when known)",
+    "citation_count": "int (per-database, NOT comparable across databases)",
+    "is_retracted": "bool|null (null = unknown, do not read as 'not retracted')"
+  },
+  "authority": {
+    "doi": {"crossref": 10, "publisher": 6, "europepmc": 4, "pubmed": 4, "openalex": 3, "semanticscholar": 3, "arxiv": 2, "generic": 1},
+    "pmid": {"pubmed": 10, "europepmc": 8, "openalex": 4, "semanticscholar": 3, "generic": 1},
+    "pmcid": {"europepmc": 10, "pubmed": 8, "generic": 1},
+    "arxiv": {"arxiv": 10, "semanticscholar": 4, "openalex": 3, "generic": 1},
+    "title": {"publisher": 10, "crossref": 9, "europepmc": 7, "pubmed": 7, "openalex": 6, "semanticscholar": 6, "arxiv": 6, "generic": 2},
+    "authors": {"publisher": 10, "crossref": 9, "pubmed": 7, "europepmc": 6, "openalex": 6, "arxiv": 6, "semanticscholar": 5, "generic": 2},
+    "year": {"crossref": 9, "pubmed": 8, "europepmc": 8, "publisher": 8, "openalex": 7, "arxiv": 7, "semanticscholar": 6, "generic": 2},
+    "venue": {"crossref": 9, "publisher": 9, "europepmc": 7, "pubmed": 7, "openalex": 6, "arxiv": 6, "semanticscholar": 5, "generic": 2},
+    "volume": {"publisher": 9, "crossref": 8, "pubmed": 7, "europepmc": 6, "generic": 2},
+    "issue": {"publisher": 9, "crossref": 8, "pubmed": 7, "europepmc": 6, "generic": 2},
+    "pages": {"publisher": 9, "crossref": 8, "pubmed": 7, "europepmc": 6, "generic": 2},
+    "type": {"crossref": 9, "pubmed": 8, "publisher": 7, "openalex": 6, "europepmc": 5, "semanticscholar": 5, "generic": 2},
+    "publisher": {"publisher": 10, "crossref": 8, "openalex": 5, "generic": 2},
+    "abstract": {"publisher": 10, "europepmc": 8, "pubmed": 7, "arxiv": 7, "semanticscholar": 6, "openalex": 5, "crossref": 3, "generic": 2},
+    "language": {"crossref": 6, "europepmc": 6, "openalex": 6, "publisher": 6, "generic": 2},
+    "url": {"publisher": 9, "crossref": 8, "europepmc": 6, "pubmed": 6, "openalex": 5, "semanticscholar": 4, "generic": 2},
+    "citation_count": {"openalex": 6, "semanticscholar": 6, "europepmc": 5, "crossref": 4, "generic": 1},
+    "is_retracted": {"pubmed": 8, "europepmc": 7, "crossref": 7, "publisher": 6, "openalex": 5, "generic": 2}
+  },
+  "semantics_notes": {
+    "citation_count": "Per-database counts are not comparable (index scope and lag differ). Merge keeps one value and records the others in conflicts; never sum across databases.",
+    "year": "Crossref 'issued' is the earliest issue date and may differ from the online-first year used by Europe PMC 'pubYear'; a +/-1 disagreement is recorded in conflicts but does not block a merge.",
+    "venue": "Europe PMC 'journalTitle' is the full title; PubMed 'source' is the NLM abbreviation and 'fulljournalname' the full title. Prefer full titles for display.",
+    "type": "Genres are not aligned across databases (Crossref 'journal-article' vs Europe PMC 'research-article' vs S2 'JournalArticle'); normalised to the shared vocabulary in canonical-schema.md and the raw value kept in field_provenance.",
+    "doi": "Some databases return the DOI inside a resolver URL; normalise before comparison.",
+    "is_retracted": "null means no retraction signal was present in that response, NOT that the paper is confirmed valid. Retraction notices are surfaced as flags + pending_human, never silently dropped."
+  },
+  "databases": {
+    "crossref": {
+      "label": "Crossref REST API",
+      "signatures": ["message.items", "message-type", "is-referenced-by-count", "container-title"],
+      "list_paths": ["message.items", "message", "items"],
+      "record_paths": {
+        "title": ["title", "original-title", "short-title"],
+        "doi": ["DOI", "doi"],
+        "year": ["issued.date-parts", "published.date-parts", "published-print.date-parts", "published-online.date-parts", "created.date-parts"],
+        "venue": ["container-title", "short-container-title", "institution.name"],
+        "volume": ["volume"], "issue": ["issue"], "pages": ["page", "article-number"],
+        "authors": ["author"],
+        "type": ["type"], "publisher": ["publisher"], "abstract": ["abstract"],
+        "language": ["language"], "url": ["URL", "resource.primary.URL"],
+        "citation_count": ["is-referenced-by-count"],
+        "pmid": ["alternative-id"], "pmcid": ["alternative-id"]
+      },
+      "query": {
+        "dialect": "query.bibliographic=<free text>; filter=from-pub-date:YYYY-01-01,until-pub-date:YYYY-12-31[,type:journal-article]",
+        "fields": ["query.bibliographic", "query.author", "query.title", "query.container-title"],
+        "strength": "broad free-text recall over DOI-bearing records; snippet-based ranking",
+        "caps": "rows<=1000 per request, deep paging via offset; polite pool identified by mailto; no hard auth needed"
+      },
+      "notes": "Abstracts are frequently absent or wrapped in JATS tags. 'update-to' entries with type retraction indicate a retraction notice. Titles arrive as arrays."
+    },
+    "europepmc": {
+      "label": "Europe PMC REST",
+      "signatures": ["resultList.result", "hitCount", "authorString", "journalTitle"],
+      "list_paths": ["resultList.result", "resultList", "result"],
+      "record_paths": {
+        "title": ["title", "bookOrReportDetails.title"],
+        "doi": ["doi"], "pmid": ["pmid"], "pmcid": ["pmcid"], "arxiv": ["arxivId"],
+        "year": ["pubYear", "firstPublicationDate"],
+        "venue": ["journalTitle", "journalInfo.journal.title", "bookOrReportDetails.publisher"],
+        "volume": ["journalVolume", "journalInfo.volume"], "issue": ["issue", "journalInfo.issue"],
+        "pages": ["pageInfo"],
+        "authors": ["authorList.author", "authorString", "authorIdList.authorId"],
+        "type": ["pubTypeList.pubType", "pubType", "resultType"],
+        "abstract": ["abstractText"], "language": ["language"],
+        "url": ["fullTextUrlList.fullTextUrl.url", "doi"],
+        "citation_count": ["citedByCount"], "is_retracted": ["isRetracted"]
+      },
+      "query": {
+        "dialect": "((TITLE_ABS:\"term\" OR TITLE_ABS:\"synonym\") AND (FIRST_PDATE:[YYYY-01-01 TO YYYY-12-31]))",
+        "fields": ["TITLE_ABS", "TITLE", "AUTH", "JOURNAL", "ABSTRACT", "METHODS"],
+        "strength": "strong biomedical + life-science coverage, includes preprints and PMC full text links",
+        "caps": "pageSize<=1000, cursorMark paging; anonymous quota applies"
+      },
+      "notes": "authorString is 'Family Initials' separated by commas. 'source' is the database code (MED/PMC/PPR/AGR), not a journal - never map it to venue."
+    },
+    "pubmed": {
+      "label": "NCBI PubMed E-utilities (esummary/efetch)",
+      "signatures": ["esearchresult", "MedlineCitation", "PubmedArticle", "uids"],
+      "list_paths": ["esearchresult.idlist", "PubmedArticleSet.PubmedArticle", "result"],
+      "record_paths": {
+        "title": ["title", "MedlineCitation.Article.ArticleTitle"],
+        "doi": ["articleids", "MedlineCitation.Article.ELocationID"],
+        "pmid": ["uid", "pmid", "MedlineCitation.PMID"],
+        "pmcid": ["articleids"],
+        "year": ["pubdate", "sortpubdate", "MedlineCitation.Article.Journal.JournalIssue.PubDate.Year"],
+        "venue": ["fulljournalname", "source", "MedlineCitation.Article.Journal.Title"],
+        "volume": ["volume"], "issue": ["issue"], "pages": ["pages", "elocationid"],
+        "authors": ["authors", "MedlineCitation.Article.AuthorList.Author"],
+        "type": ["pubtype", "MedlineCitation.Article.PublicationTypeList.PublicationType"],
+        "abstract": ["MedlineCitation.Article.Abstract.AbstractText"],
+        "language": ["lang", "MedlineCitation.Article.Language"],
+        "is_retracted": ["pubtype"]
+      },
+      "query": {
+        "dialect": "(\"term\"[Title/Abstract] OR \"synonym\"[Title/Abstract]) AND (\"YYYY\"[dp] : \"YYYY\"[dp])",
+        "fields": ["[Title/Abstract]", "[MeSH Terms]", "[Author]", "[Journal]", "[dp]"],
+        "strength": "curated MeSH indexing, reliable PMID/PMCID, retraction links",
+        "caps": "esearch retmax<=10000, efetch <=200 ids per call; <=3 req/s without API key"
+      },
+      "notes": "esummary returns a keyed object (result.uids + result.<uid>); the harvester expands it. Genre lives in pubtype; 'Retracted Publication' entries must be flagged."
+    },
+    "openalex": {
+      "label": "OpenAlex works API",
+      "signatures": ["openalex.org/W", "authorships", "abstract_inverted_index", "cited_by_count"],
+      "list_paths": ["results", "works"],
+      "record_paths": {
+        "title": ["display_name", "title"],
+        "doi": ["doi", "ids.doi"],
+        "year": ["publication_year", "publication_date"],
+        "venue": ["primary_location.source.display_name", "host_venue.display_name", "locations.source.display_name"],
+        "volume": ["biblio.volume"], "issue": ["biblio.issue"], "pages": ["biblio.first_page"],
+        "authors": ["authorships.author", "authorships"],
+        "type": ["type", "type_crossref"], "publisher": ["primary_location.source.host_organization_name"],
+        "abstract": ["abstract_inverted_index"],
+        "language": ["language"], "url": ["primary_location.landing_page_url", "id"],
+        "citation_count": ["cited_by_count"], "is_retracted": ["is_retracted"]
+      },
+      "query": {
+        "dialect": "search=<free text>; filter=from_publication_date:YYYY-01-01,to_publication_date:YYYY-12-31[,type:article]",
+        "fields": ["search", "title.search", "abstract.search", "fulltext.search"],
+        "strength": "largest open cross-domain index, good citation graph and venue normalisation",
+        "caps": "per-page<=200, cursor paging; polite pool via mailto"
+      },
+      "notes": "DOI carries the https://doi.org/ prefix. Abstracts are inverted indices - reconstruct word order from positions. Title field is display_name."
+    },
+    "semanticscholar": {
+      "label": "Semantic Scholar Graph API",
+      "signatures": ["paperId", "externalIds", "publicationVenue", "citationCount"],
+      "list_paths": ["data", "papers"],
+      "record_paths": {
+        "title": ["title"],
+        "doi": ["externalIds.DOI", "externalIds.doi"],
+        "pmid": ["externalIds.PubMed"], "arxiv": ["externalIds.ArXiv"],
+        "year": ["year", "publicationDate"],
+        "venue": ["venue", "publicationVenue.name", "journal.name"],
+        "volume": ["journal.volume"], "pages": ["journal.pages"],
+        "authors": ["authors"],
+        "type": ["publicationTypes", "publicationType"],
+        "abstract": ["abstract"], "url": ["url"],
+        "citation_count": ["citationCount"], "is_retracted": ["isRetracted"]
+      },
+      "query": {
+        "dialect": "query=<free text>&year=YYYY-YYYY&fields=title,abstract,year,venue,authors,externalIds,citationCount",
+        "fields": ["query", "title", "abstract"],
+        "strength": "semantic relevance ranking, good preprint and arXiv linkage",
+        "caps": "limit<=100, offset paging; unauthenticated tier is heavily rate limited (429)"
+      },
+      "notes": "Unmatched relevance ranking is not comparable to lexical matches; keep ranking provenance. externalIds is the only reliable identifier block."
+    },
+    "arxiv": {
+      "label": "arXiv API (Atom)",
+      "signatures": ["<feed", "arxiv:doi", "opensearch:totalResults"],
+      "list_paths": ["feed.entry"],
+      "record_paths": {
+        "title": ["title"], "doi": ["arxiv:doi", "doi"], "arxiv": ["id"],
+        "year": ["published", "updated"], "authors": ["author"],
+        "type": ["arxiv:primary_category"], "abstract": ["summary"],
+        "venue": ["arxiv:journal_ref"], "url": ["id"]
+      },
+      "query": {
+        "dialect": "search_query=all:\"term\" AND all:\"synonym\"&start=N&max_results=100",
+        "fields": ["all", "ti", "abs", "au", "cat"],
+        "strength": "preprint coverage in physics/CS/math; no peer-review status",
+        "caps": "max_results<=2000, <=1 req / 3 s"
+      },
+      "notes": "Atom XML: values are tag-wrapped. Returned here as text; a JSON conversion is required before harvesting, otherwise parse as text and record a degradation."
+    },
+    "publisher": {
+      "label": "Publisher / local material records (PDF metadata, JSON, CSV)",
+      "signatures": ["journal_title", "publication_date", "article_type", "crossmark"],
+      "list_paths": ["records", "articles", "items", "data"],
+      "record_paths": {
+        "title": ["title", "article_title", "dc:title"],
+        "doi": ["doi", "DOI", "identifier"],
+        "year": ["publication_date", "published", "year", "dc:date"],
+        "venue": ["journal_title", "journal", "container_title"],
+        "volume": ["volume"], "issue": ["issue"], "pages": ["pages", "first_page"],
+        "authors": ["authors", "author", "dc:creator"],
+        "type": ["article_type", "type"], "publisher": ["publisher"],
+        "abstract": ["abstract", "description"], "language": ["language"],
+        "url": ["url", "link"], "is_retracted": ["crossmark", "retraction"]
+      },
+      "query": {
+        "dialect": "(not a search API) local records supplied as material; no query issued",
+        "fields": [],
+        "strength": "highest per-field authority for title/authors/venue/abstract",
+        "caps": "n/a"
+      },
+      "notes": "Used for organiser-supplied records (material.json, publisher exports, PDF front matter). Never treat a PDF filename as bibliographic truth."
+    },
+    "generic": {
+      "label": "Unrecognised bibliographic source",
+      "signatures": [],
+      "list_paths": [],
+      "record_paths": {},
+      "query": {"dialect": "unknown - free text", "fields": [], "strength": "unknown", "caps": "unknown"},
+      "notes": "Falls back to the synonym table in scripts/main.py; lowest merge authority; flagged metadata_confidence<=0.5 and recorded in uncertainty."
+    }
+  },
+  "synonyms": {
+    "title": ["title", "display_name", "article_title", "titles", "primary_title", "paper_title", "document_title", "heading", "name"],
+    "abstract": ["abstract", "abstracttext", "abstract_text", "summary", "description"],
+    "doi": ["doi", "doi_url", "digital_object_identifier"],
+    "year": ["year", "publication_year", "pubyear", "pub_year", "issued", "published", "published_year", "date", "publication_date", "firstpublicationdate"],
+    "venue": ["venue", "journal", "journaltitle", "journal_title", "container_title", "publicationtitle", "journal_name", "fulljournalname", "source_title", "publication"],
+    "authors": ["authors", "author", "authorname", "authorstring", "authorships", "creators", "contributors", "authorlist"],
+    "volume": ["volume", "journalvolume", "journal_volume"],
+    "issue": ["issue", "journalissue", "journal_issue"],
+    "pages": ["pages", "page", "pageinfo", "page_info", "pagination", "first_page"],
+    "type": ["type", "publicationtype", "publication_type", "pubtype", "doctype", "document_type", "genre", "publicationtypes"],
+    "publisher": ["publisher", "publisher_name", "institution"],
+    "url": ["url", "link", "links", "fulltexturl", "full_text_url", "landing_page_url", "href"],
+    "pmid": ["pmid", "pubmed_id", "pubmedid"],
+    "pmcid": ["pmcid", "pmc_id"],
+    "arxiv": ["arxiv", "arxiv_id", "arxivid"],
+    "language": ["language", "lang"],
+    "citation_count": ["citation_count", "citedbycount", "cited_by_count", "citationcount", "is_referenced_by_count"],
+    "is_retracted": ["is_retracted", "isretracted", "retracted", "retraction"]
+  },
+  "containers": ["externalids", "external_ids", "ids", "identifiers", "identifier", "articleids", "article_ids", "metadata", "bib", "bibliographic", "item", "record", "attributes", "properties", "primary_location", "location", "journalinfo", "journal"],
+  "query_templates": {
+    "crossref": "query.bibliographic=\"{t}\"; filter=from-pub-date:{y0}-01-01,until-pub-date:{y1}-12-31[,type:journal-article]",
+    "europepmc": "((TITLE_ABS:\"{t}\") OR (TITLE_ABS:\"{k}\")) AND (FIRST_PDATE:[{y0}-01-01 TO {y1}-12-31])",
+    "pubmed": "(\"{t}\"[Title/Abstract] OR \"{k}\"[Title/Abstract]) AND ({y0}[dp] : {y1}[dp])",
+    "openalex": "search={t} {k}; filter=from_publication_date:{y0}-01-01,to_publication_date:{y1}-12-31",
+    "semanticscholar": "query={t} {k}; year={y0}-{y1}; fields=title,abstract,year,venue,authors,externalIds,citationCount",
+    "arxiv": "search_query=all:\"{t}\" AND all:\"{k}\"; max_results=100",
+    "publisher": "local material records; no query issued",
+    "generic": "{t} (free text; source dialect unknown)"
+  },
+  "contract_aliases": {
+    "candidates": ["candidate", "candidates", "results", "result", "papers", "paper", "records", "record", "documents", "literature", "corpus", "articles", "items", "candidate_list", "retrieved_papers", "bibliography"],
+    "queries": ["queries", "query", "query_log", "search_log", "searches", "requests", "query_plan", "search_strategy"],
+    "screening": ["screening", "filter", "filters", "inclusion", "selection", "decisions", "screening_log"],
+    "coverage": ["coverage", "gap", "gaps", "coverage_report", "recall", "completeness"],
+    "sources": ["sources", "source", "databases", "dbs", "sources_used"],
+    "uncertainty": ["uncertainty", "uncertainties", "limitations", "risks", "caveats"],
+    "errors": ["errors", "error", "issues", "failures"],
+    "pending_human": ["pending_human", "human_review", "needs_review", "pending", "arbitration"],
+    "degradations": ["degradations", "degraded", "fallbacks", "degradation"],
+    "changes": ["changes", "change_log", "changelog"],
+    "runtime": ["runtime", "meta", "run_info", "execution"],
+    "evidence": ["evidence", "evidence_log", "provenance", "trace", "audit"],
+    "status": ["status", "run_status"],
+    "metrics": ["metrics", "scores", "evaluation", "benchmark"],
+    "clusters": ["clusters", "cluster", "merge", "merges", "dedup", "deduplication", "groups"],
+    "conflicts": ["conflicts", "conflict"],
+    "citations": ["citations", "citation_list", "references"]
+  },
+  "item_aliases": {
+    "id": "id", "title": "title", "authors": "authors", "author": "authors", "year": "year",
+    "venue": "venue", "journal": "venue", "doi": "doi", "url": "url", "sourceurl": "url",
+    "link": "url", "source": "source_dbs", "sourcedb": "source_dbs", "sourcedbs": "source_dbs",
+    "database": "source_dbs", "query": "query_ids", "queryid": "query_ids",
+    "queryids": "query_ids", "retrievedat": "retrieved_at", "relevance": "relevance_score",
+    "relevancescore": "relevance_score", "score": "relevance_score", "reason": "relevance_reason",
+    "relevancereason": "relevance_reason", "evidence": "evidence", "evidencesnippet": "evidence",
+    "abstract": "abstract", "pmid": "pmid", "type": "type", "language": "language",
+    "flags": "flags", "confidence": "metadata_confidence", "metadataconfidence": "metadata_confidence",
+    "clusterid": "cluster_id", "included": "included", "rank": "rank"
+  },
+  "dedup": {
+    "identifier_keys": ["doi", "pmid", "pmcid", "arxiv"],
+    "title_exact_min_len": 15,
+    "year_tolerance": 1,
+    "fuzzy_auto": 0.90,
+    "fuzzy_arbitrate": 0.82,
+    "token_jaccard_prefilter": 0.55,
+    "rules": [
+      "same normalised identifier -> merge (high)",
+      "identical normalised title, len>=15, same year within tolerance -> merge (high)",
+      "identical title but |year delta|>tolerance -> do NOT merge, pending_human",
+      "SequenceMatcher(title)>=fuzzy_auto AND same first-author surname AND year within tolerance -> merge (high)",
+      "fuzzy_arbitrate<=ratio<fuzzy_auto with the same guards -> merge (medium) and flag needs_arbitration",
+      "author+year alone is never sufficient"
+    ]
+  },
+  "coverage": {
+    "unique_to_db": "candidate whose source_dbs has exactly one entry - identifies single-database-only literature",
+    "field_fill": "per database, share of its records with a non-null value for each canonical field; a fill rate of 0 or a rate far below the cross-database maximum marks a systematic gap",
+    "recall_estimate": "seed-set recall = |merged candidates AND supplied seed/gold identifiers| / |supplied seeds|; a lower bound only, null when no seeds are supplied",
+    "gaps": "required databases with no response, fields absent across all databases, queries that could not be executed offline"
+  }
+}

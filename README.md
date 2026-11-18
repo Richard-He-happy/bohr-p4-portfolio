@@ -6,7 +6,5 @@ Each folder under `challenges/` is one submitted Skill package (`SKILL.md` + `sc
 
 | challenge | track | package |
 |---|---|---|
-| analysis-05 | analysis | [challenges/analysis-05](challenges/analysis-05) |
-| search-01 | search | [challenges/search-01](challenges/search-01) |
-| search-11 | search | [challenges/search-11](challenges/search-11) |
-| writing-02 | writing | [challenges/writing-02](challenges/writing-02) |
+| experiment-02 | experiment | [challenges/experiment-02](challenges/experiment-02) |
+| search-05 | search | [challenges/search-05](challenges/search-05) |
