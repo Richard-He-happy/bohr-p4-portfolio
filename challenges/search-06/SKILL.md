@@ -1,212 +1,118 @@
 ---
 name: literature-delta-tracker
 description: >-
-  Incremental literature discovery and tracking. Resolves a topic subscription and fixed
-  time windows, replays organizer-supplied source snapshots (Crossref / EuropePMC /
-  publisher JSON, records.jsonl, CSV, queries.jsonl), rebuilds records, normalizes
-  identity keys, deduplicates and merges preprint -> published -> version -> correction
-  chains, diffs each window against the previous snapshot, and emits only genuinely new
-  or changed works with merged and suppressed alerts. Use it when a task asks for
-  "latest / new / weekly literature tracking", a topic subscription, a new-item list
-  between two dates, or a delta against an earlier snapshot. It writes result.json with
-  every output_contract field echoed, plus candidates.csv, query_log.json, alerts.json,
-  alerts.md, snapshot.json and deltas/window_NN.json.
-version: 1.0.0
+  Incremental literature discovery and tracking. 围绕“订阅配置—固定时间窗检索—与上一快照比对—新增/变更清单—按规则提醒”的完整闭环，在 organizer-supplied source snapshots（Crossref/EuropePMC/publisher JSON、records.jsonl、CSV、queries.jsonl）上真实解析、重建记录、归一身份、去重与版本/撤稿链合并，对每个窗口做 delta diff，输出可回放证据。该 Skill 要求 Harness Agent 先运行基线脚本，再亲自读取材料、核验候选与窗口归属、修正缺失并诚实标注，禁止把脚本骨架/模板直接当成品。Use when a task asks for "latest / new / weekly literature tracking", a topic subscription, a new-item list between two dates, or a delta against an earlier snapshot. Writes result.json with all output_contract fields echoed, plus candidates.csv, query_log.json, alerts.json, alerts.md, snapshot.json and deltas/window_NN.json.
+version: 1.1.0
 license: MIT
 ---
 
 # literature-delta-tracker
 
-## 1. Purpose and boundaries
+## 0. 给 Harness Agent 的最高优先级指令（先读这里）
 
-The kernel is a **delta**: given a subscription, a fixed window `[start, end)` and a
-previous snapshot, return the works that are genuinely new or changed in this window,
-with the evidence needed to replay that judgement. A one-shot topic search is not a
-tracking result; the tracked object here is the per-window change list plus the state
-that makes the next window computable.
+你是最终交付负责人。`scripts/main.py` 与 `scripts/core.py` 只是工具，**最终交付物由你亲自读材料、推导、撰写/制作**。禁止把脚本骨架、模板或未经核验的自动输出直接当成品。
 
-In scope: subscription configuration, window definition, incremental retrieval over
-organizer-provided source snapshots, identity normalization, deduplication, version and
-retraction handling, snapshot diffing, alert merge/suppression, replay records.
+执行顺序必须是：
 
-Out of scope: full-text reading, writing reviews, live crawling the skill itself (no
-network), and treating any alert as a scientific conclusion. Alerts are bibliographic
-delta signals only.
+1. 先运行基线脚本，产出全套文件和所有 `output_contract` 字段的落盘版本（**完整性优先**）。
+2. 再亲自打开 `/input` 下的真实材料与基线输出，逐项核验：候选文献是否真实存在于材料、窗口归属是否正确、去重和版本合并是否正确、提醒是否被正确抑制、状态/缺失项是否诚实。
+3. 在基线之上修正和补强，**不得删除、清空或遗漏任何基线与契约字段**；若不确定，保留原产物并在 result.json 标注 `reviewed_by_agent`。
+4. 完稿前按第 10 节自检清单逐项确认，再用 `scripts/core.py` 校验输出。
 
-## 2. When to use / not use
+## 1. 用途与边界
 
-Use when the input contains bibliographic records plus (optionally) a previous snapshot,
-queries log, reference graph, or a window/as-of definition, and the deliverable is a
-new-item list or a re-checkable candidate set.
+本 Skill 解决“最新文献发现与追踪”的增量判定问题。给定订阅主题/查询集/时间窗和上一快照，返回相对上一个快照真正新增或改变的文献，并保留可回放依据。**判断是否做对，不看抓了多少条，而看增量判定是否可复算、重复与误报是否被压住、每个提醒是否有回放依据。**
 
-Do not use when there is no record-like material at all: the skill then reports
-`input_error`/`insufficient_evidence` with `missing[]` instead of inventing papers.
+在范围内：订阅配置、窗口定义、增量检索、身份归一、去重、预印本-正式版-修订-撤稿链合并、快照 diff、提醒合并/抑制、回放记录。
 
-## 3. Runtime contract
+不在范围：全文阅读、自动写综述、未授权定时抓取、把提醒当科学结论；也不得编造数据、引用、分数或来源状态。
 
-- Input `/input` (read-only): `case.json`, `task.md`, `artifacts/**`, materials.
-- Work `/app/work` (state): `state.json` (advances between runs; delete or run with a
-  fresh work dir to force a first-run baseline).
-- Output `/app/output`: `result.json` + sidecars (below).
-- `result.json` always echoes every `output_contract` field verbatim in name, keeps
-  `case_id`, and adds `status`, `sources`, `uncertainty`, `pending_human`, `errors`,
-  `degradations`, `changes`, `missing`, `runtime`.
-- A **partial `result.json` is written before heavy work**; the final file overwrites it.
-- Exit code is always 0, including on empty input, bad JSON, or internal failure.
-- Deterministic and offline: no network, no model calls (`runtime.model_requests = 0`),
-  stdlib only, paths resolved from arguments, never from CWD.
+## 2. 何时使用 / 不使用
 
-## 4. Quick start
+使用：任务包含 bibliographic records 且要求“latest / new / weekly literature tracking”、主题订阅、某日期窗口内新条目、或与旧快照比较。
+
+不使用 / 无记录：输入没有任何 record-like 材料时，必须返回 `status=insufficient_evidence` 或 `input_error`，在 `missing[]` 说明缺什么，不发明文献。
+
+## 3. Runtime contract（必须逐条落实）
+
+- 输入 `/input`（只读）：`case.json`、`task.md`、题面规定的材料（PDF/DOCX/CSV/图片等）。**必须真实解析材料内容**，用环境提供的 `pdf-text-tool` 等工具实际读取 PDF/DOCX/图片，不得依据文件名或领域标签猜测/补造内容。
+- 工作目录 `/app/work`：可写状态，如 `state.json`、中间校验文件。
+- 输出 `/app/output`：最终 `result.json` + 全部 sidecar。可编辑 Office/slide/diagram 产物必须额外给出真实渲染的 PDF/PNG 预览；本题通常无此类产物，若 `output_contract` 要求则必须真实生成。
+- `result.json` 必须包含原 `output_contract` 的**全部字段**（键名不改）与 `case_id`，并添加 `status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`missing`、`runtime` 等真实字段。
+- 预算：64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理）。先明确 rubric 权重最高的交付物，优先完成并**尽早落盘 honest partial**，再增量改进。
+- 诚实性：status/sources/uncertainty/change records 必须真实；不确定或材料不足要显式标注 `pending_human` / `limitations`；不得编造数据、引用、分数。
+- 任何情况下 exit code 为 0，包括空输入、坏 JSON、内部异常、超时降级。
+
+## 4. 快速开始与保留的脚本命令
+
+运行前先进入工作目录或传入绝对路径。标准命令：
 
 ```bash
 python3 /skills/weekly-skill/scripts/main.py --input /input --output /app/output --work /app/work
-python3 /skills/weekly-skill/scripts/core.py --input /input --output /app/output   # re-validate output
+python3 /skills/weekly-skill/scripts/core.py --input /input --output /app/output
 ```
 
-Useful flags: `--now 2024-03-01` (freeze the clock for reproducible runs),
-`--window-start 2024-02-01 --window-end 2024-03-01` (override the window),
-`--max-k 20` (cap candidates). Normally run once per window; each run advances
-`output/snapshot.json` and `work/state.json`.
+可选 flags：`--now 2024-03-01` 冻结时钟；`--window-start 2024-02-01 --window-end 2024-03-01` 覆盖窗口；`--max-k 20` 限制候选数。
 
-## 5. Input discovery (semantic, no fixed key names)
+注意：`main.py` 生成的是**基线骨架**，不是最终成品。你必须在其基础上完成真实材料核验、修正与诚实标注。
 
-1. Read `case.json` (fallback: any `case*.json`). Keep `case_id` and
-   `output_contract` untouched. Also read `task_instruction`, `organizer_supplied_scope`,
-   `scope`, `constraints` (topic, include/exclude terms, lang, max_k) if present.
-2. Recursively scan `/input/**` and parse by extension + content, not by label:
-   `.json/.jsonl/.ndjson` (Crossref `message.items`, EuropePMC `resultList.result`,
-   record lists, snapshots, graphs, queries), `.csv/.tsv` (record tables), `.md/.txt/
-   .yaml/.xml` (briefs, configs, query logs).
-3. Any dict carrying a title plus (DOI | arXiv | PMID | PMCID | any date) is a record;
-   container/author/affiliation sub-objects are skipped. Metadata is read from aliased
-   keys (`DOI/doi`, `title/titles/article_title`, `author/authorList`, `created/
-   deposited/published/issued/firstIndexDate/firstPublicationDate`, `container-title/
-   journalTitle`), including camelCase and kebab-case spellings.
-4. Files whose names match `snapshot|previous|baseline|state` are **history**, not
-   candidates: their identity keys seed the previous snapshot and they are excluded from
-   the candidate list.
-5. Anything the case implies but the input lacks (gold list, seed PDFs, patents) is
-   listed in `missing[]`; it is never synthesized.
+## 5. 执行流程（编号步骤）
 
-## 6. Core flow
+### 步骤 1：盘点输入与契约
 
-1. **Records** — rebuild observations with `src` file + JSON pointer locator,
-   `retrieved_at` (record field, else file mtime), index date and publication date.
-2. **Identity + dedup** — keys: normalized DOI, arXiv id (version stripped), PMID,
-   PMCID, normalized title; union-find merge on shared keys.
-3. **Version merge** — per work, rank items (preprint 1 < published 3+ < notice 6) and
-   keep the full `version_chain` (doi, arxiv, type, index_date, rank, source).
-4. **Subscription + scoring** — topic terms from scope/instruction/material; score =
-   `0.60*topic_term_coverage + 0.25*seed_similarity + 0.15*recency`; include/exclude
-   filters, then `top-k`.
-5. **Windows** — windows from CLI, then the case (`window/period/range/as_of`), then
-   artifacts, else derived from the previous snapshot end or the latest index date;
-   membership is `[start, end)` on index/import date in UTC.
-6. **Delta** — per window, per work: `new`, `version_update`, `correction_or_retraction`,
-   `recovered_late` (delayed indexing before the window start), `duplicate_noise`
-   (suppressed), `out_of_window`. State advances after each window.
-7. **Alerts** — one alert per merged work, dedup by alert id, cap per window, suppress
-   already-alerted/low-confidence items; delivery record written per alert.
+- **输入**：`/input/case.json`、`/input/task.md`、`/input` 下全部材料文件。
+- **动作**：
+  1. 读 `case.json`（fallback：任意 `case*.json`），保留 `case_id` 和 `output_contract` 原样。
+  2. 读取 `task_instruction`、`organizer_supplied_scope`、`scope`、`constraints`（topic、include/exclude、lang、max_k 等）。
+  3. 递归扫描 `/input/**`，按扩展名和内容识别材料文件；不要只凭文件名假设来源。
+  4. 识别哪些文件是当前候选记录，哪些是 `snapshot|previous|baseline|state` 历史文件。
+  5. 用 `pdf-text-tool` 等真实解析 PDF/DOCX/CSV/图片；解析失败则记录。
+- **输出**：写入 `/app/work/agent_workplan.json`，至少包含：关键输入文件路径、`output_contract` 字段列表、识别到的窗口/订阅提示、rubric 权重最高的交付物清单、材料解析状态。
+- **失败分支**：
+  - `case.json` 缺失/不可解析：尝试扫描其他 JSON；仍不可用则准备最小合法 result.json（`status=input_error`，`errors[]`，`missing[]`），退出码 0。
+  - 某材料无法解析：记入 `degradations[]`，继续处理其他文件。
 
-## 7. Outputs
+### 步骤 2：运行基线脚本，产出全套骨架（完整性优先）
 
-`result.json` keys: `case_id`, `status`, `skill`, `subscriptions`, `windows`,
-`new_items`, `candidates`, `queries`, `alerts`, `coverage`, `snapshot`, `sources`,
-`uncertainty`, `pending_human`, `errors`, `degradations`, `changes`, `missing`,
-`runtime`, `checks`, plus all contract fields and `_output_contract` (the echoed
-contract itself).
+- **输入**：步骤 1 确认的 `/input`。
+- **动作**：运行 `scripts/main.py`，确保输出目录 `/app/output` 被创建并写入所有 sidecar。
+- **输出**：`result.json` 初稿（应 echo 所有 `output_contract` 字段）、`candidates.csv`、`query_log.json`、`alerts.json`、`alerts.md`、`snapshot.json`、`deltas/window_NN.json`。
+- **失败分支**：
+  - 脚本异常/超时：捕获错误到 `/app/work/script_error.txt`；立即尝试用 `scripts/core.py` 做静态校验；如果 result.json 未生成，手工创建包含全部 `output_contract` 字段与 `case_id` 的最小合法 JSON，`status=partial` 或 `input_error`，退出码 0。
+  - 脚本成功但少字段：手工补齐缺失字段，不要删除已生成内容。
 
-Sidecars: `candidates.csv` (one row per candidate, locator columns included),
-`query_log.json`, `alerts.json`, `alerts.md` (human digest), `snapshot.json`
-(item keys, work ids, alert ids, window end), `deltas/window_NN.json`.
+### 步骤 3：真实解析材料并核验证据
 
-Field-level detail: `references/02-output-schema.md`.
+- **输入**：`/input` 全部材料、`/app/output/result.json`、`/app/output/candidates.csv`、`/app/output/alerts.json`。
+- **动作**：
+  1. 亲自读取解析后的材料内容，提取订阅主题、查询式、时间窗起止、来源快照、去重键、无用记录等。
+  2. 逐条检查候选文献：标题/DOI/作者/日期/期刊/版本是否真实出现在输入材料中。每个 DOI 若存在必须能在输入文本中 verbatim 找到；不能补造。
+  3. 核验窗口归属：是否按 `[start, end)` 使用 UTC index/import date；跨窗、延迟入库、补抓是否被正确归类为 `recovered_late` 或 `out_of_window`。
+  4. 核验版本链：预印本→正式版→修订→勘误/撤稿是否合并为同一 work；`version_chain` 是否保留各节点。
+  5. 核验提醒：是否每条 merged work 只提醒一次；已提醒/低置信是否抑制；提醒投递记录是否可解析。
+  6. 记录任何脚本判断与你阅读材料后判断不一致的地方。
+- **输出**：在 `/app/work/agent_review_notes.json` 中写出核验结论，包括 `verified`、`conflicts`、`missing_evidence`、`pending_human`、`fixes_to_apply`。
+- **失败分支**：
+  - 材料缺失导致无法核验：在 result.json `uncertainty[]` / `pending_human[]` 标明，不伪造。
+  - 冲突：保留基线产物，在 result.json 中标注 `conflict`，列出双方依据。
 
-## 8. Rules that decide correctness
+### 步骤 4：产出完整成品，回填 result.json 与 sidecar
 
-Window, dedup, version, retraction and alert rules (with the exact normalization steps
-and tie-break rules) are in `references/01-methods-rules.md`. Read it before changing
-any threshold; the defaults there are the ones the self-checks expect.
+- **输入**：步骤 3 的核验结论和基线产物。
+- **动作**：
+  1. 将核验结论写回 result.json：`checks.agent_review.summary`、`checks.agent_review.verified`、`pending_human`、`conflicts` 等。
+  2. 修正候选、窗口、版本链、提醒等字段，但**只能增强，不得破坏基线结构**。
+  3. 确保所有 sidecar 与 result.json 一致；如 `candidates.csv` 中行与 candidates 数组一一对应。
+  4. 如果 `output_contract` 要求可编辑 Office/slide/diagram，生成真实文件并渲染 PDF/PNG 预览。
+  5. 用 `scripts/core.py --input /input --output /app/output` 再校验一次。
+- **输出**：最终 `/app/output` 完整文件。
+- **失败分支**：
+  - core.py 校验失败：修复具体错误；若无法修复，保留字段并标 `pending_human` / `limitations`，不能为空。
+  - 时间不足：立即写回当前 result.json，`status=partial`，并确保所有契约字段存在。
 
-## 9. Evidence and locators
+### 步骤 5：rubric 自检与最终校验
 
-Every candidate carries `source_db`, `retrieved_at`, `query_id` and
-`evidence_locator{source_file, pointer, index_date_field}`; `evidence_snippet` is a verbatim
-prefix of the record abstract/title. `query_id` resolves to a row in `queries[]` or is
-explicitly `q_unmapped` and flagged. A DOI that is not found verbatim in the input text
-fails `checks` (`doi_traceable_to_input`), which is the anti-fabrication guard.
-
-## 10. Exceptions and degradations
-
-| Situation | Handling |
-|---|---|
-| `case.json` missing/unparsable | scan other JSON; `errors[]`, `status=input_error` if nothing usable |
-| no record objects | `status=insufficient_evidence`, `missing[]`, empty candidates, exit 0 |
-| one artifact unparsable | `degradations[]` entry; other files still processed |
-| empty window | empty delta lists, counts zeroed, digest says "no new items" |
-| missing index date | publication date used as proxy; flagged `index_date_proxy` |
-| DOI/title conflicts (same title, different DOI) | kept as one work with a multi-node `version_chain`, both DOIs preserved |
-| retraction/correction/erratum | `correction_or_retraction`, still alerted once |
-| delayed indexing | `recovered_late`, alerted as backfill |
-| no previous snapshot | first-run baseline; every in-window item is new; `uncertainty[]` notes it |
-| no gold list | `coverage.skill_metrics.recall_at_k=null` with a stated reason, never a guessed number |
-
-## 11. Status semantics
-
-`ok` — candidates produced, no errors, contract complete.
-`partial` — produced but limited (few candidates, error entries, missing inputs).
-`insufficient_evidence` — no usable records; limitations stated.
-`input_error` — case input unusable; nothing invented.
-
-## 12. Budget and interruption
-
-Deterministic replay only: no request budget is consumed. Typical runtime on organizer
-snapshots is a few seconds. Because the partial `result.json` is written first and every
-section is wrapped, an interruption leaves a valid file with `status=partial` and the
-completed sections.
-
-## 13. Self-check before returning
-
-1. `result.json` parses; `case_id` equals the input; `status` in the enum.
-2. Every `output_contract` key exists.
-3. Candidates have title/source_db/retrieved_at/query_id/reason/locator; DOI syntax OK
-   and each DOI occurs verbatim in the input.
-4. `new_items` reference existing candidates; work ids unique.
-5. Alerts have delivery records and resolvable work ids.
-6. `candidates.csv`, `query_log.json`, `alerts.json`, `alerts.md`, `snapshot.json` exist.
-7. Re-running on the same window yields zero new items (idempotent).
-
-`checks` in `result.json` runs items 1-6 automatically; `core.py --output` re-runs them.
-
-## 14. Minimal example (illustrative, NOT a formal case result)
-
-Input: `case.json` with `case_id="demo"`, `windows=[{2024-01-01,2024-02-01}]`, and one
-Crossref response containing a 2024-01-10 bioRxiv preprint plus one 2024-02-20 journal
-version of the same title.
-
-```bash
-python3 scripts/main.py --input ./in --output ./out --work ./work --now 2024-03-01
-```
-
-Illustrative output shape (values below are a schematic example, not measured results):
-
-```json
-{"windows":[{"index":0,"counts":{"new":1,"updated":0,"alerts":1}}],
- "candidates":[{"candidate_id":"c001","doi":"10.1101/2024.01.09.555001","delta_class":"new",
-                "version_chain":[{"doi":"10.1101/...","version_rank":1}]}],
- "alerts":[{"alert_id":"al_0_…","class":"new","delivery":{"status":"written"}}]}
-```
-
-## 15. Files, version and maintenance
-
-- `SKILL.md` (this file) — contract, flow, exceptions, self-check.
-- `scripts/main.py` (1.0.0) — pipeline entry point (`--help`).
-- `scripts/core.py` (1.0.0) — parsing/normalization/dedup/scoring/validation library;
-  also the standalone validator (`--input/--output`).
-- `references/01-methods-rules.md` — window, dedup, version, alert rules.
-- `references/02-output-schema.md` — result.json and sidecar field dictionary.
-- `references/03-checks-and-example.md` — rubric map, exception table, replay recipe.
-
-Thresholds live in two places only: `ALERT_CAP`/scoring weights in `main.py`, identity
-constants in `core.py`. Change them together with the references, bump `version`, and
-re-run both listed self-checks.
+- **输入**：最终 `/app/output` 全部文件。
+- **动作**：按第 10 节自检清单逐项核对；检查 result.json 合法性；再次确认 exit code 0。
+- **输出**：合规提交。
+- **失败分支**：若

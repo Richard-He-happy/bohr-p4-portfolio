@@ -1,14 +1,20 @@
 ---
 name: sci-data-cleaning
-description: Audit-grade cleaning of scientific tabular data. Classifies missing/censored/sentinel values without statistical imputation, canonicalises numeric/date/unit/encoding faults with recorded reversible transforms, resolves duplicate records under a dictionary-derived key, and emits an analysis-ready table plus a field-level quality report whose numbers are re-derived from the emitted tables. Use when a case supplies dirty CSV/TSV tables together with a data dictionary and a cleaning workorder.
-version: 1.2.0
+description: Audit-grade cleaning of scientific tabular data. Classifies missing/censored/sentinel values without statistical imputation, canonicalises numeric/date/unit/encoding faults with recorded reversible transforms, resolves duplicate records under a dictionary-derived key, and emits an analysis-ready table plus a field-level quality report whose numbers are re-derived from the emitted tables. Use when a case supplies dirty CSV/TSV/PDF/DOCX table transcriptions, a data dictionary and a cleaning workorder.
+version: 1.3.0
 ---
 
 # sci-data-cleaning（科研数据清洗与处理）
 
+## 0. 最高优先级：完整性优先（v6）
+
+**脚本只是工具，最终交付物由你（Harness Agent）亲自读材料、推导、撰写/制作。** 禁止把脚本骨架、模板或未审阅的中间产物直接当成品提交。
+
+进入任务后必须先运行本 Skill 自带脚本/流程，产出**全套基线交付物**，再在此基础上做核验与改进。后续改动只能增强基线，不得删除、清空或遗漏任何基线产物与 `output_contract` 字段。若不确定字段含义，保留原产物并在 `result.json` 中记录 `reviewed_by_agent`。提交前必须逐项核对「output_contract 字段 × 磁盘文件 × result.json 键」，任何缺项先补齐再收尾。
+
 ## 1. 用途与边界
 
-对一个脏表完成题面约定的**五类处理**，并交出可复核的证据链：
+对给定脏表完成题面约定的**五类处理**，交付可复核证据链：
 
 | 类别 | 本 Skill 做什么 |
 |---|---|
@@ -18,122 +24,127 @@ version: 1.2.0
 | 格式/单位/编码 | 千分位、小数逗号、科学计数、脚注符、尾随单位、日期格式、GBK 乱码；换算因子与编码修复全部记录，**可逆** |
 | 质量报告 | 字段级问题清单 + 五类汇总，报告数字由 `verify.py` 从产出表反算校验 |
 
-**不做**：统计建模与假设检验、图表美化、数据库运维、实验设计、论文写作；不做均值/中位数填补（题面《Harbor 运行契约》明确"不得推断总体统计量或填补缺失/无效源值"）；不解析 XLSX/PDF 数据表（写入 `degradations` 并给出转换建议）。
+**不做**：统计建模与假设检验、图表美化、数据库运维、实验方案设计、论文写作；不做均值/中位数填补，不推断总体统计量，不填补缺失或无效源值（题面运行时契约明确禁止）。自带脚本只稳定处理 CSV/TSV/TXT；对 PDF/DOCX/图片，必须由 Agent 先用平台工具真实解析出文本/表格，再进入清洗流程，不得跳过或按文件名猜测内容。
 
-## 2. 何时触发
+## 2. 触发条件
 
-- 用户给出**脏表格 + 数据字典/字段说明 + 清洗要求**，要"清洗表 + 质量报告 + 可复现证据"。
-- 用户抱怨"报告数字和清洗后的表对不上""单位和编码不统一""同一样品重复出现"。
-- 不适用：只需要画图/建模；只需要从 PDF 抄数字；没有表格只有正文。
+- 用户给出**脏表格 + 数据字典/字段说明 + 清洗要求**，要求交付清洗表、质量报告、可复现证据。
+- 用户报告“报告数字与清洗表不一致”“单位/编码不统一”“同一样品重复”“缺失值处理不清”。
+- 不适用：只需要画图/建模；只有正文无表格；需要从原始 PDF 推断总体统计量或做统计填补。
 
-## 3. 运行契约
+## 3. 运行时契约与目录约定
 
 ```bash
-python3 scripts/main.py --input /input --output /app/output     # 单入口
-python3 scripts/verify.py --output /app/output                  # 独立复核（可选）
+cd /app/work
+python3 /skills/weekly-skill/scripts/main.py --input /input --output /app/output
+python3 /skills/weekly-skill/scripts/verify.py --output /app/output
 ```
 
-- 输入只读 `/input`（`case.json`、`task.md`、表格、字典），产物只写 `--output`（默认 `/app/output`）。
-- **退出码恒为 0**；失败写进 `result.json` 的 `errors`，不抛栈、不静默。
-- 纯标准库（`csv/json/re/zipfile/unicodedata/hashlib`），不联网、不 pip、不依赖 CWD（脚本用 `Path(__file__).resolve().parent` 定位 `references/`）。
-- 确定性：行序=源文件行序，浮点 `%.12g`，无随机种子、无时区推断；同输入重跑 `cleaned.csv` 应逐字节一致（`__src` 记录"源文件:行号"）。
+- 输入只读 `/input`（含 `case.json`、`task.md`、表格、字典及其他材料），工作目录 `/app/work`，最终产物只写 `/app/output`。
+- 若脚本安装在 `/skills/weekly-skill`，使用上述路径；若路径不同，以实际安装目录为准。脚本不依赖 CWD，内部用 `Path(__file__).resolve().parent` 定位 `references/`。
+- 纯标准库，不联网、不 pip、无随机种子；行序=源文件行序，浮点 `%.12g`。
+- **退出码恒为 0**，失败写入 `result.json` 的 `errors`，不抛栈、不静默。
+- 可编辑 Office/幻灯片/图形产物若被产出，必须额外渲染 PDF/PNG 预览；本题通常交付 CSV/JSON/MD，但若平台要求渲染则执行。
 
-## 4. 输入发现（语义识别，不假设键名）
+## 4. 输入盘点与材料真实解析
 
-1. `case.json`（或 `--case`、任意 `case*.json`）：`case_id`、`output_contract`、`files`、`data_dictionary`、`workorder` 等键名不固定，按去分隔符小写后匹配（`output_contract`/`contract`/`outputs`/`output_schema` 等价）。
-2. 递归扫描输入目录：`.csv/.tsv/.txt/.dat` → 数据表；`.md/.json/.docx` → 字典与任务说明候选；`case.json` 本身不做数据表。
-3. 主表选择：`case.json` 中提到文件名的优先，否则取行数最多者；其余表仍登记进 `sources`。
-4. 字典优先级：独立字典文件（Markdown 管道表 / JSON / DOCX）→ `case.json` 内联 `data_dictionary/fields/columns/schema`。字段名按去标点小写匹配，允许 `NO3_mgL` 与 `no3 mg/l` 对齐。
-5. 表头括号内单位（`浓度 (mg/L)`）作为该列单位提示；字典 `unit` 列优先。
-6. 材料缺失（无字典、无主键、无 workorder）→ 逐条写 `pending_human`，不臆造。
+1. 读 `/input/case.json`（若无则找 `case*.json`）获取 `case_id`、`output_contract`、`files`、`data_dictionary`、`workorder` 等；键名按去分隔符小写匹配，不假设固定键。
+2. 读 `/input/task.md` 获取题目约束、评分要求与输出规定。
+3. 递归扫描 `/input`：`.csv/.tsv/.txt/.dat` 是数据表候选；`.md/.json/.docx` 是字典/任务说明候选；`case.json` 本身不是数据表。
+4. **真实解析每个材料**：CSV/TSV/TXT 直接读取；PDF 用平台提供的 `pdf-text-tool` 或其他文档解析工具抽取文本/表格，DOCX 用可用解析库抽取表格/段落，图片表格用 OCR 或平台工具识别并复核。将抽取结果保存到 `/app/work/extracted/`，并记录提取方式。
+5. 主表选择：`case.json` 中明确提到的文件名优先；否则取行数最多者，其余表登记进 `sources`。
+6. 字典优先级：独立字典文件（Markdown 管道表 / JSON / DOCX）→ `case.json` 内联 `data_dictionary/fields/columns/schema`。字段名去标点小写对齐，允许 `NO3_mgL` 与 `no3 mg/l` 匹配。
+7. 表头括号内单位（`浓度 (mg/L)`）作为该列单位提示；字典 `unit` 列优先。
+8. 若材料缺失、损坏或无法解析：逐条写 `pending_human`，不臆造数据、引用或分数。
 
-## 5. 输出契约
+## 5. 本题专属执行流程
 
-`result.json`：`case_id`、`status`(`ok|partial|insufficient_evidence|input_error`)、`summary`、`sources`（每文件 sha256）、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`artifacts`（路径+字节+sha256）、`unresolved_contract_fields`、`runtime`，并**原样回填 `output_contract` 的每个键**（键名不改；未匹配到值按类型给 `null`/`[]` 并记入 `unresolved_contract_fields`，不删键）。
+**步骤 1：盘点输入**
+- 输入：`/input/case.json`、`/input/task.md`、目录列表。
+- 动作：读取 `case.json` 与 `task.md`，扫描材料，建立文件清单、`output_contract` 字段清单、字典/主键/workorder 候选。
+- 输出：输入清单、契约键列表、清洗目标。
+- 失败：`case.json` 缺失或坏 JSON → 尝试其他 `case*.json`；仍失败则 `status=input_error` 并继续可处理部分。
 
-| 产物 | 内容 |
-|---|---|
-| `cleaned.csv` | `__row_id`、`__src`（文件:行）、原列、`__flags`（逐行故障码） |
-| `transform_log.csv` | 逐单元格：原值→新值、故障码、单位因子、可逆性、备注 |
-| `field_issues.csv` | 字段级：角色/单位/缺失率/缺失原因/无效文本/越界/分布异常 |
-| `stats.json` | 描述统计（样本 sd、使用/缺失/删失计数），口径写明 |
-| `quality_report.md/.json` | 质量报告（骨架见 `references/quality_report_template.md`） |
-| `duplicates.csv` | 被隔离的重复行（含 `duplicate_of`）与近似重复组 |
-| `assertions.json` | 一致性自检：行数、缺失总数、日志↔表逐格一致 |
-| `run.log` | 错误/降级/待人工确认流水 |
+**步骤 2：真实解析材料**
+- 输入：文件清单。
+- 动作：按第 4 节解析每个数据表、字典、workorder；保留源文件 sha256；抽取产物写入 `/app/work/extracted/`。
+- 输出：可读取的数据表、字典、workorder；`sources` 哈希表。
+- 失败：格式不支持、文件损坏或 OCR 无法识别 → 写入 `degradations`/`errors`，标 `pending_human`，绝不猜测内容。
 
-被移除的行只进 `duplicates.csv`，原值永不丢失。
+**步骤 3：运行基线脚本生成全套产物**
+- 输入：解析后的材料路径。
+- 动作：执行 `scripts/main.py --input /input --output /app/output`，生成基线文件；再执行 `scripts/verify.py --output /app/output` 做一致性校验。
+- 输出：`/app/output` 下全集产物 + `result.json` 初稿。
+- 失败：脚本异常 → 捕获堆栈写入 `errors`，仍须按输出契约手动生成必要文件，保证 `result.json` 合法。
 
-## 6. 核心流程
+**步骤 4：Agent 亲自核验证据与推导一致性**
+- 输入：基线产物、原始解析材料、字典/workorder。
+- 动作：逐列核对字段角色、单位、缺失哨兵、异常阈值是否与字典一致；抽查若干原值→清洗值；核对报告数字是否由表反算；检查重复记录保留是否合理；必要时重新推导补齐缺口。
+- 输出：核验记录（`verified`、`pending_human`、`conflicts`）及修订清单。
+- 失败：发现不一致 → 修正规则/产物，记录 `changes`；无法判断 → 保留原值并标 `pending_human`。
 
-读表 → 列画像（角色/数值率/唯一率/字典规格）→ 逐格归一（缺失分类 → 格式 → 单位 → 日期）→ 主键去重 → 双判据异常标记 → 描述统计 → 落盘 → 自检。策略由**字典**驱动：`range`→上下限、`missing`→哨兵码、`unit`→换算目标单位、`key`→主键、`precision`→小数位；workorder 中的"统一为某单位"会覆盖该维度的目标单位。
+**步骤 5：产出完整成品并增量改进**
+- 输入：核验结果与修订清单。
+- 动作：更新清洗表、日志、报告、`result.json`；补齐所有 `output_contract` 字段；若有可编辑 Office 产物则渲染 PDF/PNG 预览。
+- 输出：最终 `/app/output` 全套交付物。
+- 失败：预算/时间不足 → 保留当前部分结果，标 `status=partial`，列出缺失项。
 
-## 7. 故障码（与 `references/cleaning_rules.json` 一致）
+**步骤 6：自检 rubric 并回填 `result.json`**
+- 输入：`/app/output` 与契约字段清单。
+- 动作：逐项执行第 9 节自检清单；确认 `result.json` 含 `case_id` 及 `output_contract` 全部键；审核状态、来源、不确定性、变更记录真实；确认退出码 0。
+- 输出：合法 `result.json`。
+- 失败：契约字段缺失 → 补齐；无法补齐 → 写入 `unresolved_contract_fields` 并标 `partial`，不得删键。
 
-`M1` 空/占位 · `M2` 未检出 · `M3` 低于定量限 · `M4` 哨兵码 · `F1` 数值格式 · `F2` 日期格式 · `F3` 编码乱码 · `U1` 单位不一致/别名 · `U2` 单位不明 · `D1` 完全重复 · `D2` 主键重复 · `D3` 近似重复 · `R1` 越界 · `R2` 分布异常 · `T1` 类型冲突。
+## 6. 预算策略（64 次请求 / 900 秒）
 
-## 8. 评分点落点
+总预算 64 次模型请求，3 个固定案例，单案例目标 **≤20 次请求**。分配如下：
 
-| 评分维度 | 本包证据 |
-|---|---|
-| 任务完成度 | 五类处理各有 CSV 列与报告章节；`field_issues.csv` 覆盖每一列 |
-| 结果正确性 | 字典驱动换算与判别；只做确定性修复；单位因子可逆；报告数字由 `assertions.json` 反算 |
-| 结果完整性 | 字段级清单 + 逐格日志 + 未处理缺口 |
-| 可核验性 | `__src` 行定位、`sources` 哈希、`transform_log` 原值、独立 `verify.py` |
-| 使用增益 | 一条命令端到端；无需人工改表；规则外置可复用 |
-| 创新 | 字典推断字段级策略、逐格行定位、可逆单位/编码映射、报告↔表一致性自检、拒绝统计填补 |
-| 可靠体验 | 退出码恒 0；先写 partial 再 finalize；九类异常均有降级路径 |
-| 生态贡献 | 规则表 JSON、报告模板、调用说明与限制 |
+| 步骤 | 请求次数 | 必须/可选 |
+|---|---|---|
+| 盘点输入 | 1-2 | 必须 |
+| 解析材料 | 2-5 | 必须；每个 PDF/DOCX 解析算 1 次 |
+| 运行脚本+verify | 1-2 | 必须；脚本不占用模型请求，仅结果读取 |
+| 核验关键字段/抽查 | 3-6 | 必须，至少抽查 3-5 组关键原值 |
+| 修订与补齐 | 2-4 | 按需，发现不一致才做 |
+| 自检回填 | 1-2 | 必须 |
 
-## 9. 证据与定位规范
+- **尽早落盘 honest partial**：步骤 3 完成后立即保存 `result.json`，确保 `status`、`sources`、`artifacts` 等真实存在。
+- 若单案例接近 20 次或运行接近 840 秒，停止改进，保留 partial，无条件 finalize。
+- 禁止无意义循环、重复读同一文件或重新清洗无变化数据；无需对所有行逐行人工核验，按字段级和随机抽查即可。
 
-每个被改写的单元格在 `transform_log.csv` 留 `row_id + locator(文件:行) + original_value + cleaned_value + fault_codes + reversible`；每个输入文件在 `sources` 留 sha256。报告中的任何数字都必须能由 `quality_report.json.summary` 复现，并由 `assertions.json` 反算通过。
+## 7. 隐藏案例鲁棒性与降级
 
-## 10. 异常降级分支
+任何情况下都必须产出合法 `result.json`，退出码 0。
 
 | 情形 | 处置 |
 |---|---|
-| 无 `case.json` | 仍扫描目录；`errors=[CASE_MISSING]`，`status=input_error` |
-| `case.json` 坏 JSON | 记 `CASE_MISSING`/`CASE`，继续尝试其它 `case*.json` |
-| 无表 | `status=insufficient_evidence`，`pending_human=[NO_TABLE]` |
-| 空表（仅表头） | 正常产出空表 + 报告，`n_rows=0` |
-| 无主键 | 键回退为整行；`pending_human=[KEY_NOT_FOUND]`，只去完全重复 |
+| `case.json` 缺失/坏 JSON | 扫描其他 `case*.json`；仍失败记 `errors=[CASE_MISSING]`，`status=input_error`，继续扫描目录 |
+| 无数据表 | `status=insufficient_evidence`，`pending_human=[NO_TABLE]`，输出空 `result.json` |
+| 空表（仅表头） | 正常产出空清洗表与质量报告，`n_rows=0` |
+| 无字典/主键/workorder | 键回退整行，只去完全重复；写 `pending_human=[KEY_NOT_FOUND]` |
 | 全列缺失 | 该列 `missing_pct=100`，仍出现在 `field_issues.csv` |
-| GBK 乱码 | 多编码打分 + GB18030 回解，写 `degradations` |
-| 单位不明 | 保留原值 + `U2`，进 `uncertainty` |
-| XLSX/PDF 数据表 | `degradations=[UNSUPPORTED_FORMAT]`，提示转 CSV；字典仍尽力解析 |
+| PDF/DOCX/图片无法解析 | 写 `degradations=[UNSUPPORTED_FORMAT]` 或解析错误，提示转 CSV/TXT；不猜测内容 |
+| 编码乱码 | 多编码打分 + GB18030 回解，写 `degradations` |
+| 单位不明 | 保留原值 + `U2`，写 `uncertainty` |
+| 主键冲突且值冲突、日期 `d/m` 与 `m/d` 均合法、`1,234` 千分位/小数歧义 | 保留原值、打标记、写 `pending_human/uncertainty`，不擅自选边 |
 | 输出目录不可写 | 依次退到 `./output`、系统临时目录 |
-| 行数超限 | 截断并写 `ROW_LIMIT` 降级 |
+| 超时 | 900 秒内留 60 秒收尾；到 840 秒必须停止一切改进，写入 `result.json` 并退出 |
+| 行数超限 | 脚本 `--rows` 控制上限，截断并写 `ROW_LIMIT` |
 
-## 11. 冲突与人工确认
+## 8. 评分维度 → 交付要求 → 自证方式对照表
 
-字典与数据矛盾（单位不符、主键重复且值冲突、日期 `d/m` 与 `m/d` 均合法、哨兵码落在物理范围内、`1,234` 可能是千分位也可能是小数）时：保留原值、打标记、写 `pending_human`/`uncertainty`，绝不擅自选一边或改数。
-
-## 12. 预算与断点
-
-单案例典型 < 5 s；`--rows` 控制行数上限。先写 partial `result.json`（含全部契约键），流程结束无条件 finalize 覆盖；任何阶段抛错都被捕获并落盘。
-
-## 13. 最小调用示例（示例，非正式案例结果）
-
-下面是一次**构造的小样例**，仅示意接口，不代表任何正式案例的答案：
-
-输入 `in/data.csv`：`sample_id,site,NO3_mgL` / `S-01,A,12.5` / `s-01 ,A,12.5` / `S-02,B,ND` / `S-03,B,-999`，加 `in/data_dictionary.md`（`NO3_mgL | 硝酸盐 | mg/L | 0-200 | -999`）与 `in/case.json`（`case_id:"DEMO"`，`output_contract:{"cleaned_table":"..."}`）。
-
-```bash
-python3 scripts/main.py --input in --output out
-```
-
-示意输出（**示例，非正式案例结果**）：`status=ok`；`cleaned.csv` 3 行（`s-01` 判为 `S-01` 重复，隔离到 `duplicates.csv`）；`NO3_mgL` 第 2 行空白 + `M2_not_detected`，第 3 行空白 + `M4_sentinel`；`field_issues.csv` 记 `n_missing=2`、`missing_pct=66.67`；`result.json` 的 `cleaned_table`、`row_counts` 已回填。
-
-## 14. 文件清单、版本与维护
-
-| 文件 | 作用 |
-|---|---|
-| `SKILL.md` | 本说明 |
-| `scripts/main.py` | 单入口：发现→清洗→落盘→result |
-| `scripts/verify.py` | I/O 适配、产物写出、独立复核、报告渲染 |
-| `references/cleaning_rules.json` | 缺失词表、单位换算表、日期格式、故障码、契约同义词 |
-| `references/quality_report_template.md` | 质量报告骨架（占位符由脚本填充） |
-| `references/skill_guide.md` | 完整方法、字段约定、限制、FAQ、自检清单 |
-
-版本 `1.2.0`；规则改动只改 `cleaning_rules.json`（自带 `version`），脚本逻辑不动。维护：新增单位→加到对应维度的 `factors`；新增缺失写法→加到 `missing_tokens`。
+| 评分维度 | 交付要求 | 自证方式 |
+|---|---|---|
+| 实际效果 40：任务完成度 15 | 五类处理均有 CSV 列与报告章节，每列都在 `field_issues.csv` | `cleaned.csv`、`field_issues.csv`、`quality_report.md` |
+| 实际效果 40：结果正确性 15 | 字段处理符合字典语义与量纲；异常判据与分布匹配；去重主键真实；单位/编码转换无损；报告数字与结果表一致 | 字典驱动规则、`transform_log.csv`、`assertions.json` 反算、`verify.py` |
+| 实际效果 40：结果完整性 5 | 覆盖约定五类处理；字段级问题清单；统计假设与图表选择依赖的记录被保留 | `field_issues.csv`、`stats.json`、报告章节完整 |
+| 实际效果 40：结果可核验性 5 | 输入、规则、日志、输出可独立复核并复跑 | `__src` 行号、`sources` sha256、`transform_log.csv` 原值、`run.log`、`assertions.json` |
+| 使用增益 25：质量增益 15 | 相同输入下比基础 Agent 更少误改、更一致 | 逐字段规则、拒绝统计填补、可逆转换、字典驱动去重 |
+| 使用增益 25：效率增益 5 | 减少人工改表与返工 | 一条命令端到端，`run.log` 显示无人工干预 |
+| 使用增益 25：增益可验证性 5 | 公平对照证明改善 | `assertions.json` 反算通过、`changes` 记录修订前后差异 |
+| 创新增益 15：新增能力 5 | 基础 Agent 难以稳定实现的字段级策略推断、跨表主键对齐、可逆映射、报告一致性自检 | `cleaning_rules.json` + 脚本输出 + 文档说明 |
+| 创新增益 15：方法改进 5 | 缺失分类、异常标记策略、近似重复归一、格式映射有实质改进 | `references/skill_guide.md` 方法说明 |
+| 创新增益 15：创新证据 5 | 证明创新点相对已有方案的边界与价值 | `references/skill_guide.md` 的适用边界与限制 |
+| 可靠体验 10：调用与易用性 3 | 正确触发，按说明完成一次清洗 | SKILL.md 指引、一条命令 |
+| 可靠体验 10：运行稳定性 4 | 不同表结构/编码/规模/重复运行稳定 | 标准库、确定性输出、无随机种子 |
+| 可靠体验 10：异常处理 3 | 对空表、全列缺失、乱码、单位不明、主键冲突、文件损坏等识别处置 |

@@ -399,6 +399,8 @@ def report(outdir, Q, S):
         r["column"], r["role"], r["canonical_unit"] or "-", r["n_rows"], r["n_missing"], r["missing_pct"],
         r["missing_reasons"] or "-", r["n_dist_outlier"]) for r in fi[:30]) or "| - |"
     v["UNITS"] = "\n".join("- %s" % k for k in (Q.get("units") or {})) or "- none declared"
+    v["OVERRIDES"] = "\n".join("- %s -> %s" % (d, u) for d, u in (Q.get("canonical_units") or {}).items()) \
+        or "- none stated in the workorder"
     v["STATS"] = "n, mean, median, sd, min, max, q1, q3 per column with the exclusion rule: `stats.json`."
     v["PENDING"] = "\n".join("- **%s** %s" % (x.get("code"), x.get("message")) for x in S["pending"]) or "- none"
     tpl = (REF / "quality_report_template.md").read_text(encoding="utf-8")

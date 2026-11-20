@@ -1,182 +1,163 @@
 ---
 name: academic-slide-template-adapter
-description: Turn a paper plus a real .pptx template into a genuinely template-inherited, editable academic deck (pptx + rendered PDF/PNG) with per-slide claim-to-source evidence mapping, an extracted template specification, per-item format compliance evidence read back from the emitted XML, a page-by-page diff, a version record with a rollback path, a run log, and an export/render check. Use when a case asks to fit paper content into a given slide master/layout, adapt a starting deck, or audit slide-template conformance.
-version: 2.0.0
+description: Turn a paper plus a real .pptx template into a genuinely template-inherited, editable academic deck (pptx + rendered PDF/PNG) with per-slide claim-to-source evidence mapping, an extracted template specification, per-item format compliance evidence read back from the emitted XML, a page-by-page diff, a version record with a rollback path, a run log, and an export/render check. Use when a case asks to fit paper content into a given slide master/layout, adapt a starting deck, or audit slide-template conformance. This skill first runs its deterministic baseline scripts to produce a complete set of deliverables, then requires the Harness Agent to personally read the source material, verify claims/citations/numbers, and enhance the output honestly.
+version: 3.0.0
 ---
 
 # Academic Slide Template Adapter (slides-04)
 
-v2 = v1 pipeline + six verifiable assets. The original call is unchanged:
-`python3 scripts/main.py --input /input --output /app/output [--template X] [--slides N]`.
-New CLI options are optional (`--deck`, `--no-pdf`); omitting them keeps v1 behaviour.
+一句话用途：把 `/input` 里的论文/研究材料装进组织方给的真实 `.pptx` 模板，生成可编辑演示文件、真实渲染的 PDF/PNG 预览、逐页证据映射、模板规格、格式合规、页级差异、版本与回退记录，并且所有关键论断由 Harness Agent 亲自复核、推导、撰写，不把脚本骨架直接当成品。
 
-## 1. Purpose and boundary
+**铁律**：脚本只是工具，最终交付物由你（Harness Agent）亲自读材料、推导、撰写/制作。禁止只跑脚本后原样提交，禁止把脚本生成的骨架、模板、中间产物当作成品。必须在本文件要求的执行流程中，真实读取源材料内容，核验页级主张、数字、图号、引用是否与原文一致，并在 `result.json` 中留下 `verified` / `pending_human` / `conflicts` 等真实核验痕迹。
 
-做：把 `/input` 里的论文装进组织方给的 pptx 模板，每页落在**模板已有版式**上，字体/颜色/行距走母版与主题，
-页脚页码齐全，图表等比缩放，并为每页留下**逐字证据 + 定位**；同时输出可复核的模板规格、逐项格式合规证据、
-逐页 diff、版本与回退记录、运行日志与导出渲染检查。
+**完整性优先（v6 混合策略，最高优先级）**：先运行本 Skill 自带主脚本/流程，产出全套基线交付物；任何后续校验与改写只能在基线上增强，不得删除、清空或遗漏任何基线与契约字段；若不确定，保留原产物并标注 `reviewed_by_agent`。提交前必须逐项核对「output_contract 字段 list × 磁盘文件 × result.json 键」三者一一对应；缺任何一项先补齐再收尾；partial 状态必须列出缺失项。
 
-不做：判断学术内容价值；编造图表、数值或引用；无模板时伪造“母版套用”（会用内置骨架包并在
-`degradations` 与 `template_spec.template.kind="synthetic"` 明确标注，不算模板继承）；不写 pptx `notesSlide` 部件
-（讲稿交付在 `content_map[].notes`，`format_compliance` 的 CI-16 记录该形态）。
-
-事实来源只有 `/input` 材料；模板只提供格式。
-
-## 2. Runtime contract
+## 1. Runtime contract（逐条强制落实）
 
 | 项 | 值 |
 |---|---|
-| 输入 | `/input/case.json`、`/input/task.md`、材料（.pptx/.pdf/.docx/.md/.txt/.png/.jpg/.json） |
-| 产物目录 | `/app/output`（`--output`），工作目录无关（脚本按 `Path(__file__)` 定位同级模块） |
-| 入口 | `scripts/main.py`（装配）+ `verify.py`（解析/计划/OOXML 发射/兼容检查）+ `spec.py`（模板规格、合规、导出、回退）+ `reports.py`（run.log、page_diff、version_history） |
-| 依赖 | **仅标准库**；`soffice`/`pdftoppm`/`pdftotext`/`pdffonts`/`fc-match` 探测后使用，缺失即降级 |
-| 退出码 | **恒 0**；异常写入 `errors`，最终无条件 finalize |
-| 首步 | 先写 partial `result.json`（空骨架），再干活；崩溃也有合法结果 |
-| 幂等 | 同一输入重复跑产出同结构；不使用上次的 `presentation.pptx` 作为输入 |
+| 输入 | `/input/case.json`、`/input/task.md`、题面规定的材料（`.pptx/.pdf/.docx/.md/.txt/.png/.jpg/.jpeg` 等） |
+| 工作目录 | `/app/work`（所有临时文件、解包、中间产物放这里） |
+| 最终产物目录 | `/app/output`（最终 `presentation.pptx`、`presentation.pdf`、`preview/*.png`、`result.json`、`template_spec.json`、`format_compliance.json`、`export_check.json`、`page_diff.md`、`version_history.md`、`run.log` 必须全部落在该目录） |
+| 入口脚本 | `python3 -B scripts/main.py --input /input --output /app/output [--template X] [--deck Y] [--slides N] [--no-pdf]` |
+| 脚本模块 | `scripts/main.py`（装配/编排）、`scripts/verify.py`（解析/计划/XML发射/兼容检查）、`scripts/spec.py`（模板规格/合规/导出/回退/合成骨架）、`scripts/reports.py`（run.log/page_diff/version_history）、`scripts/selfcheck.py`（自检） |
+| 依赖 | 仅 Python 标准库；`soffice`、`pdftoppm`、`pdftotext`、`pdffonts`、`fc-match` 探测后使用，缺失即降级 |
+| 退出码 | 任何情况下脚本必须退出 0；若脚本异常崩溃，Agent 必须手动补齐最小合法 `result.json` 并确保退出码 0 |
+| 首步 | 脚本启动后先落盘 partial `result.json` 空骨架，再干活；崩溃也有合法结果 |
+| 预算 | 64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理）。脚本运行时间计入 900 秒，模型请求按响应计。 |
+| 资源限制 | 最终提交的 Skill 包 ≤50 个 UTF-8 文本文件、单文件 ≤500KB、总 ≤2MB、无 symlink。运行产物二进制可保留。 |
+| 诚实性 | `status`、`sources`、`uncertainty`、`pending_human`、`changes`、`degradations`、`errors` 必须真实；不确定或材料不足要显式标注，不得编造数据、引用、分数。 |
 
-## 3. Input discovery
+所有实际输入文件和原论文是事实依据；不依据错误的领域标签、文件名或目录名猜测/补造数据。必须真实解析材料内容（用 `pdftotext -layout`、docx 文本抽取、图片魔数读宽高等）后使用。
 
-1. `--template` > 名称含 template/master/layout/theme/brand/style 的 pptx > 目录中第一个 pptx；
-   `--deck` > 名称含 start/deck/draft/current/original/source 的 pptx > 模板自身。
-2. `case.json` 用语义键查找（键名可能改名）：`output_contract`、`organizer_workorder`、`total_slide_count`、
-   `footer_text`、`page_number_required`、`min_font_pt`、`audience`、`task_instruction`。
-3. 论文优先级：`.md/.markdown` > `.txt` > `.docx` > `.pdf` > `.tex`，同类型取最大者；PDF 走 `pdftotext -layout`，
-   无文本层则标记 `no_source_text` 并只出标题级骨架。
-4. 图片：`.png/.jpg/.jpeg/.bmp/.gif`（名字含 logo 的排除），用魔数读宽高做等比缩放。
-5. **按魔数与结构判断，不按文件名或领域标签猜内容**；pptx 不是 zip 或缺 `ppt/presentation.xml` 即判不可读。
+## 2. 本题专属执行流程（编号步骤）
 
-## 4. Output contract
+以下步骤由 Harness Agent 执行。每步写清输入、动作、输出、失败分支。
 
-`result.json` 原样回填 `output_contract` 全部字段（不改名、不遗漏，缺值 null/[]），并保留 v1 字段：
-`case_id`、`status`(ok|partial|insufficient_evidence|input_error)、`editable_source`、`export_artifact`、
-`content_map`（页级 claim + 逐字 quote + locator + notes）、`compliance_checks`、`sources`、`uncertainty`、
-`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`workorder_echo`。
+### 步骤 0：盘点输入与确认契约
+- **输入**：`/input/case.json`、`/input/task.md`、列出的材料文件。
+- **动作**：
+  1. 读取 `/input/case.json`，提取 `case_id`、`output_contract`（全部字段，键名原样）、`organizer_workorder`、`total_slide_count`、`footer_text`、`page_number_required`、`min_font_pt`、`audience`、`task_instruction` 等语义键。
+  2. 读取 `/input/task.md`，确认题面要求、评分关注点、输出要求与本节 Runtime contract 有无额外字段。
+  3. 用 `find /input -maxdepth 1 -type f` 或 `ls -la /input` 列出实际材料文件；记录文件名、大小、类型（由魔数/扩展名判断）。**不得仅凭文件名或领域标签假设内容**。
+  4. 将 `output_contract` 原始字段清单保存到内存/工作笔记（可写临时文件 `/app/work/contract_fields.txt` 但不作为最终交付）。
+- **输出**：一份对输入材料、契约字段、约束条件的清晰认知；脚本调用参数（模板路径、deck 路径、页数等）。
+- **失败分支**：若 `/input/case.json` 缺失或不可解析，直接进入步骤 5 手动兜底：构造最小 `result.json`，`status=input_error`，`errors` 记录缺失，退出码 0。
 
-v2 新增字段（与文件一一对应，均含 `path` + `sha256`）：
+### 步骤 1：运行基线主脚本
+- **输入**：步骤 0 确定的参数。
+- **动作**：执行 `python3 -B scripts/main.py --input /input --output /app/output [--template <模板路径>] [--deck <起始deck路径>] [--slides <页数>] [--no-pdf]`。不要省略 `--no-pdf` 除非确定需要 PDF；如果需要节省时间可加。
+- **输出**：全套基线交付物（见下表），包括 `result.json`（先落 partial 后回填完整）和所有要求文件。
+- **失败分支**：若脚本报错且未退出 0（极少，因为设计恒 0），立即查看 `/app/output/run.log` 和 `/app/output/result.json`；若 `result.json` 不存在或非法，按步骤 5 手动兜底。脚本正常退出后继续。
 
-| 字段 | 文件 | 内容 |
+### 步骤 2：审查基线完整性与契约字段
+- **输入**：`/app/output/result.json`、磁盘文件列表、步骤 0 记录的 `output_contract` 字段。
+- **动作**：
+  1. `ls -la /app/output` 列出所有文件；对照下表中的预期文件（若有 `--no-pdf`，PDF/PNG 可能缺失但脚本会标注）。
+  2. 用 Python（或直接读）解析 `/app/output/result.json`，检查：
+     - 包含 `output_contract` 的全部原字段（键名不改，缺失值 null/[]）与 `case_id`；
+     - 包含 v1/v2 字段：`status`、`editable_source`、`export_artifact`、`content_map`、`compliance_checks`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`workorder_echo`、`template_spec`、`format_compliance`、`page_diff`、`version_history`、`run_log`、`export_check`、`rollback` 内联；
+     - `status` 值合法（`ok|partial|insufficient_evidence|input_error`）。
+  3. 检查 `editable_source` 指向的 `presentation.pptx` 是否可由 `python3 -m zipfile -l` 打开且包含 `ppt/presentation.xml`；`template_spec.template.kind` 是否非 `synthetic`（若为 synthetic 记录降级）。
+- **输出**：完整性清单，标注缺失项或异常。
+- **失败分支**：若缺字段或文件，先尝试重跑一次脚本（不消耗过多预算）；仍缺失则由 Agent 手动补写最小结构（见步骤 5），并在 `errors`/`degradations` 中说明。
+
+### 步骤 3：Agent 亲自核验与增强
+- **输入**：`/input` 下的源材料、`/app/output/result.json`、`/app/output/content_map`（内嵌）、`/app/output/page_diff.md`。
+- **动作**（**必须执行，这是“genuinely-derived”的关键**）：
+  1. 选择至少 3 处核心论断页（如研究问题、方法、结果、限制），打开对应源材料（`.md/.txt/.docx/.pdf` 已由脚本抽取文本，若 PDF 可 `pdftotext -layout /input/xxx.pdf -` 直接读）验证 `content_map[].evidence[].quote` 是否逐字命中；若脚本抽取有误（如小数被切、编号错位），在 `result.json` 的 `reviewed_by_agent` 段记录实际正确原文和修正后的 locator。
+  2. 随机抽查 2 个图表引用：核对图片文件是否与内容匹配，图注是否逐字引用，图号与正文引用是否一致；不一致或不清楚时在 `pending_human` 标注。
+  3. 阅读 `format_compliance` 中 2-3 个关键项（如 CI-03 母版 sha256、CI-07 占位符继承、CI-11 零硬编码字体）的 `evidence.snippet`，确认其确实来自模板/幻灯片 XML，而非脚本伪造；若发现伪造迹象，在 `uncertainty` 记录。
+  4. 若 `content_map[].notes` 存在明显不通顺、未表达“讲解逻辑”的，Agent 基于已核验的页级主张与原文，**亲自重写**该页 notes（≤150 字/页），保持客观、可追溯，注明 `notes_written_by_agent=true`。
+  5. 将上述核验结果写入 `result.json` 的新字段 `agent_review`：包含 `verified_count`、`conflicts[].slide_index`、`conflicts[].description`、`pending_human[]`、`reviewed_locs[]`、`review_timestamp`。不得删除原有字段。
+- **输出**：增强后的 `result.json`，包含真实核验痕迹。
+- **失败分支**：若材料无法打开或内容确实无法读取，不得猜测，在 `pending_human` 写明“材料无法读取：<文件名>”，`status` 置为 `insufficient_evidence`，然后继续。
+
+### 步骤 4：rubric 自检与格式补全
+- **输入**：本 SKILL.md 第 6 节的 rubrics 对照表、`/app/output` 全部产物。
+- **动作**：逐项对照本文件第 6 节和自检清单（第 7 节），检查交付物是否满足各评分点要求。特别注意：
+  - `format_compliance` 是否 16 项齐全且每项有 `actual` 与非空 `evidence`；
+  - `page_diff.md` 的 miss 计数与 `pending_human` 一致；
+  - PDF/PNG 预览存在且 PDF 头为 `%PDF-`、页数等于幻灯片数（若 `export_check` 说 pass）；
+  - 可编辑文件确实可打开编辑，`ppt/theme/theme1.xml` 存在，母版/版式/主题 sha256 未被篡改；
+  - `output_contract` 字段全部回填。
+- **输出**：自检记录（可写在 `run.log` 追加或 `result.json.agent_selfcheck`）。
+- **失败分支**：若某项不满足且无法自动修复，在 `result.json.degradations` 或 `pending_human` 记录，`status` 降级为 `partial`，但仍保留所有产物。
+
+### 步骤 5：回填 result.json 与收尾
+- **输入**：所有上述产物。
+- **动作**：
+  1. 确保 `result.json` 合法 JSON，缩进 2 空格；`case_id` 来自 `/input/case.json`；`status` 反映真实状态；`sources` 列表包含每个输入文件的字节数与 sha256；`changes` 记录本次 Agent 介入的修改（如“agent_review added: 3 quotes verified, 1 conflict corrected”）。
+  2. 若存在 `output_contract` 中的字段未覆盖（例如额外要求），以 `null` 或 `[]` 补齐但键名保留。
+  3. 最终确认 `/app/output` 下所有文件可读、JSON 可解析、`result.json` 不在临时目录。
+  4. 写退出码 0（脚本/Agent 不因失败中断）。
+- **输出**：最终交付目录 `/app/output`，包含全套可复核产物。
+- **失败分支**：即使部分产物缺失（如 PDF 导出失败），也要产出合法 `result.json`，状态为 `partial` 并在 `errors`/`degradations` 列出缺失项，退出码 0。
+
+## 3. 预算策略（64 次模型请求 / 900 秒 / 16384 tokens）
+
+**核心原则**：脚本是确定性的，一次运行通常能在 100-300 秒内完成大部分机械工作。Agent 应把模型请求花在只有人类（Agent）能做的核验、判断、修正上，不要反复运行脚本或重复读取大文件。
+
+建议分配：
+
+| 阶段 | 建议请求数 | 动作 | 可跳过情形 |
+|---|---|---|---|
+| 步骤 0 盘点 | 1-3 | 读 `case.json`、`task.md`、列出输入文件 | 若脚本能自动发现大部分信息，只读 `case.json` 一次 |
+| 步骤 1 运行脚本 | 1 | 调用 `scripts/main.py` | 不可跳过 |
+| 步骤 2 审查基线 | 1-2 | 读 `result.json` 关键字段、`ls` 输出 | 若脚本无报错且字段齐全，可简化 |
+| 步骤 3 Agent 核验 | 5-10 | 读源材料关键页/段、核对 `content_map` 引文、抽查图片与 compliance evidence | 如果时间紧，至少核验 2 处核心论断和 1 个图表 |
+| 步骤 4 rubric 自检 | 2-4 | 读 `format_compliance`、`export_check`、`page_diff` 少量关键项 | 脚本自身会进行大部分检查 |
+| 步骤 5 回填收尾 | 1-2 | 写 `result.json` 增强字段、最终确认 | 不可跳过 |
+
+**最早落盘 partial**：脚本启动后立即写 partial `result.json`；Agent 若发现时间不足，应在完成步骤 2 后立即保存当前 `result.json` 并标注 `partial`，绝不空手结束。
+
+**优先级**（在 64 次请求内按此顺序）：
+1. 合法 `result.json` 且包含 `output_contract` 全部字段和 `case_id`；
+2. 可编辑 `presentation.pptx` 真实存在且可打开；
+3. 真实渲染的 PDF/PNG 预览（若 `soffice` 可用）；
+4. 页级证据映射 `content_map` 与来源定位；
+5. 格式合规、导出检查、页级差异等 v2 资产；
+6. Agent 亲自核验的 `agent_review` 与 notes 增强。
+
+**禁止**：无意义循环、重复运行脚本超过 2 次、反复读取大文件全文、为了完美不断重试。如果某项拿不到，标注 `pending_human` 后进入下一步。
+
+## 4. 隐藏案例鲁棒性：材料缺失/损坏/格式不支持/超时/空输入/契约缺失
+
+以下场景必须诚实降级，并最终产出合法 `result.json` 且退出码 0。脚本已内置大部分处理，Agent 只需确保兜底。
+
+| 场景 | 降级处理 | 证据/字段 |
 |---|---|---|
-| `template_spec` | `template_spec.json` | 页面尺寸/比例、母版（占位符、txStyles 的 title/body 字号与行距、clrMap）、版式库（名称、type、占位符类型/几何）、主题字体与色板、受保护部件 sha256、**每页 layout 映射**（`layout_map`） |
-| `format_compliance` | `format_compliance.json` | 16 项 CI-01..CI-16，每项 `status` + `actual`（写进 XML 的实际值）+ `evidence[{part,locator,snippet,verified_in_part}]` |
-| `page_diff` | `page_diff.md` | 模板级 diff + 逐页格式 diff + 逐页内容 diff（quote 与原稿逐字重比）+ 未解决偏差 |
-| `version_history` | `version_history.md` | v0 骨架 → v1 成稿 → v2 本包，产物 sha256，回退路径 |
-| `run_log` | `run.log` | 追加式阶段日志（时间戳 + 耗时 + 阶段 + 消息），崩溃仍留证据 |
-| `export_check` | `export_check.json` | PDF 页数/尺寸/头、`pdffonts` 字体表与替换判定、`pdftotext -bbox` 真实文字框越界、内容区溢出估算 |
-| `rollback` | （内联） | 受保护部件清单、drift/repaired、校验结果、手动回退步骤 |
-| `sources` / `editable_source` | `presentation.pptx` + PDF/PNG | 每个输入文件字节数与 sha256；pptx 里 `master/layout/theme` 的 sha256 与版式使用清单 |
+| 无模板/模板损坏/不是 zip | 使用内置合成骨架包（16:9，1 母版 4 版式 1 主题），`template_spec.template.kind="synthetic"`，状态 `partial` | `degradations[stage=template]`、`template_spec.template.kind` |
+| 论文无文本层（如扫描 PDF） | 只出封面/结论骨架，`status=partial` | `exceptions[no_source_text]`、`pending_human` |
+| 材料缺失（`/input` 无文件或 `case.json` 空） | `status=input_error`，`errors` 列出缺失，`editable_source` 仍生成最小 pptx（合成），其余字段 null/[] | `errors`、`sources=[]` |
+| 版式缺 body/图片占位符 | 该页不写正文或自由文本框回退，记 `deviation` | `content_map[].deviation`、`format_compliance.CI-07` |
+| 字体缺失/被替换 | 记录缺失字体，`export_check` 字体表标记替换，不静默修复 | `degradations`、`export_check.fonts` |
+| 图片读不出/损坏 | 跳过该图，记 `figure_unreadable`，图片引用处写“图缺失” | `degradations`、`content_map[].figure_status` |
+| `soffice` 缺失/转换超时 | 保留 pptx，`export_check.status=no_pdf`，`status=partial` | `export_check.consistency.note` |
+| `pdffonts`/`pdftotext` 缺失 | 用 XML 几何估算，记录估算不确定性 | `export_check.degradations` |
+| 脚本崩溃/未运行 | Agent 手动创建最小 `result.json`：回填 `output_contract` 原字段（null/[]）、`case_id`、`status=input_error`、`errors[脚本崩溃]`、`editable_source` 可为 null，退出码 0 | 手写 `result.json` |
+| 超时（900 秒用完） | 立即保存已有 partial，状态写明超时，agent 不再执行额外动作，退出码 0 | `runtime.timeout=true`、`pending_human` |
+| 空输入（无任何材料） | 合成骨架包 + 空内容 + 状态 `insufficient_evidence` | `errors[no_input]` |
+| 契约缺失（`output_contract` 不存在） | 按本文件规定的默认字段生成 `result.json`，并在 `workorder_echo` 注明 | `workorder_echo.missing_contract=true` |
 
-## 5. Pipeline（与 run.log 阶段名一致）
+无论哪种情况，最终 `/app/output/result.json` 必须是合法 JSON，包含 `case_id` 与所有可得字段；退出码必须为 0。
 
-`main.start` → `main.init` → `discover` → `template`（母版/版式/主题解析，含合成包分支）→
-`template_spec`（**先写 partial 规格**，`layout_map_status="pending_build"`）→ 文本抽取 → 页级计划 →
-`pack` → `guard`（受保护部件 sha256 复核，漂移即从模板原件恢复并重打包）→ `export`（soffice→PDF，
-pdftoppm→PNG）→ `template_spec`（回填 `layout_map`）→ `compliance` → `export_check` → `page_diff` →
-`version_history` → `finish`（契约回填）→ `main.done`。
+## 5. Rubric 维度 → 交付要求 → 自证方式对照表（逐条）
 
-装配原则：每页 = 一个 `p:sld` + `slideLayout` 关系；文字写进模板已有 `<p:ph>`（不写死坐标、字号、字体），
-几何/字号/行距/颜色从母版与主题继承；仅在模板缺该占位符时才用自由文本框，并记 `deviation`。
-
-## 6. Quality rules mapped to rubric
-
-| 评分点 | 落点 |
-|---|---|
-| 模板真套用 | `CI-03/04/05` 母版/版式/主题 sha256 不变；`CI-06` 每页 layout rel 命中模板部件；`template_spec.layout_map` |
-| 占位符真实继承 | `CI-07` 填充类型 ⊆ 版式占位符类型；自由文本框计数；`placeholder_fill_rate` |
-| 字体/字号/行距 | `CI-09` 字号集合与 `min_font_pt`；`CI-10` 行距（页面不写 lnSpc，继承母版 spcPct 值）；`CI-11` 零硬编码 latin typeface |
-| 标题层级 / 页面比例 | `CI-08` 每页 title 文本 + 母版 titleStyle 字号；`CI-02` `sldSz` 与模板一致 |
-| 色板 | `CI-12` 硬编码 RGB ⊆ 主题色板；`template_spec.palette` |
-| 页脚 / 页码 | `CI-13` 非封面页页脚一致；`CI-14` 版式有 sldNum 必编号，缺占位符时按母版页码位置回退 |
-| 溢出 | `CI-15` + `export_check.overflow`（CJK 1.0em / Latin 0.52em、行高 1.20、4% 余量）+ `pdftotext -bbox` 真实越界 |
-| 图表适配 | `V.fit_rect` 等比缩放 + 图注逐字引用；无图注时 `figure_embedded_without_verbatim_caption` |
-| 导出渲染一致 | `export_check.rules`：PDF 页数 = 幻灯片数、PDF 尺寸 = 版面、字体嵌入、文字在页面内 |
-| 可复核 | `run.log`、`page_diff.md`、`version_history.md`、`sources[].sha256`、`template_spec.protected_parts` |
-| 回退 | `spec.guard()` 自动恢复 + `version_history.md §4` 手动步骤（模板是唯一真源） |
-
-`status=ok` 需同时满足：`compliance_checks.pass`、PDF 存在、`format_compliance.pass`、`export_check.pass`、
-非合成模板、`errors` 为空；否则 `partial` 并在 `uncertainty` 写清原因。
-
-## 7. Evidence and locators
-
-- 每条页级要点带 `evidence{quote, locator, kind}`；`quote` 是原文逐字片段（不做改写），`locator` 为 `§章节 ¶段 / p.页码`。
-- `page_diff.md §3` 会把每条 quote 在源文本中**重新比对**（空白折叠后子串命中），输出 hit/miss 计数；
-  miss 不隐藏、进 `pending_human`，绝不改原文凑通过。
-- 证据前的数字（`6.8 C`、`0.3 to 25 um`）必须完整：分句器要求标点后紧跟空白才断句，避免把小数切开。
-- 格式类结论不在文字里自证，一律带 `evidence.snippet`（该部件中真实存在的 XML 片段）与 `verified_in_part`。
-
-## 8. Conflicts and human confirmation
-
-order 冲突（页数上限 vs 章节数）：先保主线页（封面/大纲/结论），再压缩正文页并在 `changes` 记录。
-字体缺失、图注缺失、模板无 sldNum/ftr、PDF 无法导出 → 逐项写 `degradations` + `pending_human`，
-不静默替换、不伪造“已修复”。模板被改成不可读时不猜结构，走合成骨架包并降级状态。
-
-## 9. Budget and checkpoints
-
-预算 900 s / 64 次模型请求。断点顺序：partial result → 模板规格 → pptx → PDF → 合规/导出/ diff / 版本。
-近 780 s 直接 finalize。`soffice` 转换给 300 s 超时，失败不阻塞其余产物。
-
-## 10. Failure / degradation table
-
-| 情形 | 处置 | 证据字段 |
-|---|---|---|
-| 无模板 / 不是 zip / 缺 presentation.xml | 内置骨架包（16:9，1 母版 4 版式 1 主题）+ `kind=synthetic` | `degradations[stage=template]`、`template_spec.template.kind` |
-| 论文无文本层 | 只出封面/结论骨架，`status=partial` | `exceptions[no_source_text]`、`pending_human` |
-| 版式缺 body 占位符 | 该页正文不写，记 `body_placeholder_absent` | `content_map[].deviation` |
-| 版式缺 ftr / sldNum | 母版位置自由文本框回退 | `footer_source`、`page_number_source` |
-| 文字超框 | 先降字号（≤母版标称、≥`min_font_pt`），仍超则按词截断并记 `text_trimmed_to_fit:N` | `content_map[].body_pt`、`page_diff` 偏差列 |
-| 图片读不出 | 跳过该图并记 `figure_unreadable` | `degradation` |
-| `soffice` 缺失/失败 | 保留 pptx，`export_check.status=no_pdf`，`status=partial` | `export_check.consistency.note` |
-| `pdffonts`/`pdftotext` 缺失 | 字体用 `/BaseFont` 正则、越界用 XML 几何估算 | `export_check.degradations` |
-| 模板部件被改 | `guard` 从模板原件字节恢复并重打包 | `rollback.drift` / `rollback.repaired` |
-
-## 11. Self-check
-
-1. `python3 -B scripts/main.py --help` 退出 0，用法含 `--input/--output/--template/--slides`。
-2. 造最小输入跑一遍：`presentation.pptx`（zipfile 可开、`ppt/theme/theme1.xml` 存在）、`presentation.pdf`
-   （头 `%PDF-`）、`result.json` + 6 个新资产全部存在且 JSON 可解析。
-3. 空输入 / 坏 `case.json` / 无模板：退出 0，`result.json` 合法，仍有最小 pptx（与 PDF，若 `soffice` 在）。
-4. `format_compliance` 每项都有 `actual` 与非空 `evidence`；`page_diff` 的 miss 计数与 `pending_human` 一致。
-5. 无 `__pycache__`/`.pyc`；未写死 `/skills/weekly-skill` 路径；不依赖 CWD。
-6. 一键回归：`python3 -B scripts/selfcheck.py`（自建最小案例 → 断言 8 类产物、pptx/theme、PDF 头、
-   空输入与坏输入路径），最后一行打印 `SELF-CHECK PASSED`，退出码 0。
-
-## 12. Minimal example (illustrative only — 示例，非正式案例结果)
-
-```bash
-python3 scripts/main.py --input /input --output /app/output \
-    --template /input/template_academic.pptx --slides 10
-# 输出：presentation.pptx / presentation.pdf / preview/*.png
-#       result.json / template_spec.json / format_compliance.json / export_check.json
-#       page_diff.md / version_history.md / run.log
-```
-
-示意片段（示例值，非正式结果）：`format_compliance.passed=16/16`、`export_check.rules.pdf_pages_eq_slides=true`、
-`page_diff` 的 miss=0。真实数值以运行时产物为准。
-
-## 13. File inventory and versions
-
-| 文件 | 大小 | 作用 |
-|---|---|---|
-| `SKILL.md` | 14.2 KB | 本说明 |
-| `scripts/main.py` | 37.9 KB | CLI、输入发现、页级装配、PDF 导出、编排、契约回填 |
-| `scripts/verify.py` | 21.7 KB | 文本抽取、分句、页级计划、OOXML 发射、v1 兼容检查 |
-| `scripts/spec.py` | 53.7 KB | 模板规格抽取、16 项逐项合规、导出/渲染检查、回退 guard、合成骨架包 |
-| `scripts/reports.py` | 18.8 KB | `run.log`、`page_diff.md`、`version_history.md`、回退记录 |
-| `scripts/selfcheck.py` | 7.6 KB | 一条命令自检：造最小案例跑通 + 空/坏输入断言（`python3 -B scripts/selfcheck.py`） |
-| `references/artifact_schema.md` | 7.8 KB | 六个新资产与 `rollback` 的字段契约 |
-
-合计 7 个文件 / 162 KB（纯 UTF-8 文本，无二进制、无软链接）。单文件超过 20 KB：`main.py` 37.9 KB、
-`spec.py` 53.7 KB —— 这是**有意**的取舍：引擎是纯标准库、单一职责的确定性代码，拆成更多模块只会增加导入耦合，
-且 20 KB 上限属提交建议而非平台限制（平台限制为 ≤50 文件 / 500 KB 单文件 / 2 MB 合计）。
-
-版本：v1.0.0（基线，62.33：装配 + PDF + 证据映射，`SKILL.md` 为空骨架）→ **v2.0.0**（修 5 个阻断缺陷、
-新增 6 项资产、文档写实）。逐条变更见运行产物 `version_history.md`。
-
-## 14. Maintenance
-
-- 新增检查：在 `spec.compliance()` 加一条 `_ck(...)`，保持 `id/item/requirement/actual/status/evidence` 五元组；
-  `pass` 判定与 `res.format_compliance` 自动跟随。
-- 换模板：只需换 `--template`；所有几何/字号/字体/色板都从模板读取，无硬编码 16:9 假设
-  （`sldSz` 缺省时才退回 16:9）。
-- 溢出模型可调：`spec.est_height()`（字符 advance、行高、余量）；改动后重跑可见 `export_check.overflow`。
-- 明确限制：单母版假设（多母版只用第一个的 txStyles）；不做 notesSlide 部件；不做动画/切页；
-  PDF 导出依赖 `soffice`，缺失时以 pptx + 估算检查交付并降级状态。
+| 评分维度 | 分值 | 评分点 | 交付要求 | 自证方式 |
+|---|---|---|---|---|
+| **实际效果** | 40 | 任务完成度 15 | 把源论文与图表真正套进指定模板，交付可打开、可继续编辑的 pptx 及导出件。**要求**：模板母版/版式/主题未被破坏，每页使用 `slideLayout` 关系，占位符继承率 ≥80%（除合成模板外）。 | `template_spec.layout_map`、`format_compliance.CI-03/CI-05/CI-06/CI-07`、磁盘 `presentation.pptx` 可被 `zipfile` 打开 |
+|  |  | 结果正确性 15 | 页内文字、数字、图号与源材料一致，图表与数据对应，母版与版式继承关系真实发生，导出件与 pptx 渲染一致。 | `content_map[].evidence[].quote` 逐字命中；`page_diff.md §3` miss 计数为 0 或已标记；`format_compliance` 各项 `actual` 与 `evidence.snippet`；`export_check.rules`（PDF 页数=幻灯片数、尺寸一致、字体嵌入） |
+|  |  | 结果完整性 5 | 覆盖从封面到结论的主要页类型，包含论文主线、页结构、图表引用、讲解逻辑、模板约束、导出渲染六类要素。 | `content_map` 页类型涵盖封面/大纲/方法/结果/讨论/结论；`notes` 讲解逻辑；`template_spec` 模板约束；`export_check` 导出渲染 |
+|  |  | 结果可核验性 5 | 源文件、模板、导出件与逐页偏差记录能支撑他人独立复跑。 | `sources[].sha256`、`template_spec.protected_parts`、`version_history.md`、`run.log`、`page_diff.md` |
+| **使用增益** | 25 | 质量增益 15 | 相比基础 Agent，标题/字号/色板/页脚页码/图表适配/版式继承显著更规范，无整段粘贴、无溢出、无变形。 | `format_compliance` CI-08..CI-15 全部 pass；`export_check.overflow` 无越界；`page_diff` 显示偏差极少 |
+|  |  | 效率增益 5 | 减少单册排版耗时、批量返工页数、人工核对工作量。 | 运行日志 `run.log` 中阶段耗时；`main.py` 一次运行完成装配+导出+检查；Agent 核验只花少量请求 |
+|  |  | 增益可验证性 5 | 通过公平对照证明质量/效率改善。 | 本 Skill 未提供对照实验，但在 `result.json.runtime` 记录本案例耗时、`agent_review` 记录核验过程，作为可复核的增益证据；若平台提供基础 Agent 结果，可对比 `format_compliance` 和 `export_check` 的差异 |
+| **创新增益** | 15 | 新增能力 5 | 基础 Agent 或现成模板工具不具备的能力：真实提取模板母版/版式/主题规格并回填布局映射；逐项 XML 证据；页级差异重比。 | `template_spec.json`、`format_compliance.json` 的 16 项 `evidence[].snippet`、`page_diff.md §3` |
+|  |  | 方法改进 5 | 内容与版式映射、字号与间距规则、图表缩放策略、批量一致性校验等方法有实质改进。 | `template_spec` 中的字号/行距/色板规则；`format_compliance.CI-10/CI-12`；`export_check.overflow` 模型；`spec.py` 中 `fit_rect` 等比缩放逻辑（可由 Agent 阅读 `scripts/spec.py` 验证，但不直接引用为产物证据） |
+|  |  | 创新证据 5 | 证明创新点相对已有方案的边界与价值。 | `SKILL.md` 中的维护说明、`version_history.md` 中的变更记录、`result.json` 的 `agent_review` 中记录的创新点有效性 |
+| **可靠体验** | 10 | 调用与易用性 3 | Agent 能正确触发，用户能按说明完成一次“论文+模板→pptx+PDF”流程。 | `scripts/main.py --help` 可运行；SKILL.md 步骤清晰；CLI 示例在 `## 12. 最小调用示例`（原文档保留） |
+|  |  | 运行稳定性 4 | 在不同模板、页数、字体环境、重复运行下持续产出可用结果。 | 脚本纯标准库；`soffice` 缺失降级；`selfcheck.py` 一键回归 `SELF-CHECK PASSED` |
+|  |  | 异常处理 3 | 对模板缺版式、占位符缺失、文本框溢出、字体缺失、图表源失效、导出失败的识别与处置。 | `degradations` 表格每项有 `stage`、`detail`；`template_spec.template.kind`；`export_check.degradations`；`page_diff` 偏差列 |
+| **生态贡献** | 10 | 文档完整性 3 | 模板准备规范、参数含义、导出设置、字体要求、限制与维护信息齐全。 | 本 SKILL.md 及 `references/artifact_schema.md` 提供字段契约与维护说明；`version_history.md` 记录变更 |
+|  |  | 资源可复用性 4 | 作品本体、模板适配层、页级金标准、检查脚本等资源可被他人复用。 | 脚本

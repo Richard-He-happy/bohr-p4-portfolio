@@ -1,164 +1,144 @@
 ---
 name: scientific-graphical-abstract
-description: Build a single-page, editable graphical abstract (problem → method → key results → implication) from supplied paper materials, delivered as layered SVG + vector PDF (+PNG) with a per-element evidence map. Use when the task asks for a graphical abstract, TOC figure, mechanism/pipeline summary figure, or a figure that must stay editable and traceable to the source text.
-version: 1.0.0
+description: "Build a single-page, editable, evidence-traced graphical abstract or source-bound scientific figure from real input materials, delivering layered SVG + vector PDF + PNG preview + content_map + compliance checks. Use for graphical abstract, TOC figure, mechanism/pipeline summary figure, or a figure edit that must stay editable and traceable to source text. The Harness Agent must personally parse, derive and verify all scientific content; scripts are only layout, validation and render tools."
+version: 2.0.0
 ---
 
-# Scientific Graphical Abstract
+# Scientific Graphical Abstract（Agent 主导型）
 
-## 1. 用途与边界
+## 0. 一句话用途与铁律
 
-把一份论文材料压缩成**单页四段式图形摘要**：研究问题 → 方法路线 → 核心结果 → 结论/意义。
-交付物是**可继续编辑**的分层 SVG、真实矢量 PDF（尽力附 PNG），以及「每个图元 → 来源 locator + 逐字 quote」的 content_map。
+本 Skill 让 Harness Agent 从 `/input` 的真实科研材料中提取实体、关系、数据与图面约束，亲自完成一张单页、可编辑、可复核的图形摘要或指定科研图编辑，交付分层 SVG、真实矢量 PDF、PNG 预览、来源映射、合规检查与 `result.json`。
 
-做：实体/关系/数值的抽取与版面化、四段结构、图例与单位、可编辑源文件、导出检查、来源映射。
-不做：论文正文写作、统计分析、新实验设计；**不补造材料里没有的基因名、数值、时间点、单位或结论**。
+**脚本只是工具，最终交付物由你（Harness Agent）亲自读材料、推导、撰写和制作。** 不能把脚本骨架、空模板、fallback 结果或未经你核验的自动排版直接当成品。你必须核对每个关键实体、关系、数字、单位、引用和输出契约字段；不确定的要进入 `pending_human`；缺失或矛盾要显式标出，不得编造。
 
-判断标准：每个实体/数值都能追到逐字证据；重复运行结构一致；交付源文件而非截图。
+## 1. 适用范围与边界
 
-## 2. 触发与前提
+做：
+- 从材料中抽取研究问题、方法路线、核心结果、结论/意义，形成 `problem → method → results → implication` 的单页图形摘要。
+- 按组织方 `organizer_workorder` 的具体要求，完成 source-bound drawing workorder；若题目要求编辑某个已有 figure/chart（如 figure03 或真实图表），必须在默认图形摘要流程上加入对应来源图、需要保留的原始结构、需要改变的数据映射或图元。
+- 输出可继续编辑的 SVG/PDF 源文件，并提供 PNG/PDF 渲染预览。
+- 建立 `element_id → panel/role/text/svg_id/bbox → evidence{source, locator, quote, status}` 的逐元素证据映射。
+- 处理 CSVs、表格型真实数据，并保留图例、单位、条件标签。
 
-用户要 graphical abstract / 图文摘要 / 机制图 / 流程总结图，并给了论文材料（PDF、md/txt、csv）。材料里没有可引用句子时，交付 `insufficient_evidence` 并说明缺什么，不画空图。
+不做：
+- 不写论文正文、不新做统计分析、不设计实验。
+- 不按文件名、领域标签或题目摘要猜测材料内容。
+- 不补造材料里没有的基因名、数值、时间点、单位、引用、分数或结论。
+- 不提交无法追溯的来源引用，不把示例当正式结果。
 
-## 3. 运行契约
+## 2. 硬性运行时契约
 
-- 输入 `/input/case.json`（可能缺失）+ `/input/task.md` + `/input/` 材料；工作目录 `/app/work`，产物 `/app/output`。
-- 脚本参数 `--input/--work/--output` 可覆盖（评测用默认值）。只用标准库、不联网、不依赖当前目录。
-- 任何子命令**退出码恒 0**，失败写进 `result.json`；`init` 一定先写 partial `result.json`，中断也留下合法结果。
-- 预算 64 次请求 / 900 秒：先落盘，再优化。
+- 输入目录：`/input`。必须读取 `/input/case.json`（可能缺失）与 `/input/task.md`，以及题面指定的实际材料。
+- 工作目录：`/app/work`。最终产物必须落在 `/app/output`。
+- Skill 安装目录：`/skills/weekly-skill`。脚本用绝对路径调用。
+- 产出 `result.json`，必须包含原 `case.json` 中 `output_contract` 的全部字段，键名不改，且包含 `case_id`。
+- 可编辑图稿（SVG）必须额外给出真实渲染的 PDF 与 PNG 预览；PDF 为单页、文字可选中。
+- 预算：64 次模型请求、900 秒、单次响应 16384 tokens 含推理。必须优先完成最高权重交付物，尽早落盘 honest partial，再增量改进。
+- 不联网，不依赖当前目录，使用标准库与平台预装工具；只引用包内真实存在的 `scripts/main.py`、`scripts/draw.py`、`references/plan-schema.md`、`references/rubric-map.md`。
+- 任何失败或异常都不得以非零退出码结束；捕获失败、写入 `result.json`，最终以退出码 0 完成。
 
-## 4. 输入发现（脚本已完成，了解即可）
+## 3. 输入发现与真实材料解析
 
-`case.json` 用 `utf-8-sig` 读（防 BOM）；键名不固定时按语义取 `output_contract`、`task_instruction`、`organizer_workorder`、`formal_inputs`。
-材料按「魔数 + 扩展名」识别：`%PDF` → PDF（`pdftotext -layout`，locator `p.<页> b.<块>`）；可打印文本 → `para.<n>`（CSV 按行）；docx/xlsx/图片不解析，标注 *not parsed*。
-PDF 抽不出文本时会明确记录，此时**你必须自己读页面**并引用页码，不能凭标题猜内容。
+### 3.1 脚本已完成的解析
 
-## 5. 输出契约
+`scripts/main.py` 的 `init` 会：
+- 用 `utf-8-sig` 读 `case.json`，防 BOM。
+- 键名不固定时按语义取 `output_contract`、`task_instruction`、`organizer_workorder`、`formal_inputs`。
+- 按魔数 + 扩展名识别材料：`%PDF` 用 `pdftotext -layout` 解析，locator 为 `p.<页> b.<块>`；可打印文本记录为 `para.<n>`；CSV 按行。
+- 打印材料清单、段落/页码 locator、workorder 摘要、contract 字段数；写出 `/app/work/index.json` 与 partial `result.json`。
 
-`/app/output/`：
+你必须先运行 `init`，阅读其摘要，不要凭文件名或标题猜内容。
+
+### 3.2 Agent 必须亲自做的真实性解析
+
+即使 `init` 已抽取文本，你仍要亲自读出要使用的句子：
+- 用 `show --grep "<关键词>"` 检索关键机制、实体、数值、方向。
+- 用 `show --sid <材料ID> --limit 10` 查看上下文。
+- 逐字复制要作为证据的原文到 `quote`，不允许改写、跨段拼接、翻译后回译。
+- 对图表数据，优先读 CSV 中真实行列值；没有逐字句子但有结构化数据时，`quote` 可以写具体行列定位与数值，但必须在 `source`/`locator` 标明 CSV 行或列。
+
+### 3.3 非 PDF/DOCX/CSV/图片的处理
+
+- DOCX/PPTX：如果环境可用标准库 zipfile + xml 提取文本，就提取并记录；否则标 `not_parsed`。
+- 图片：如果模型上下文能直接查看图片，就实际识别文字、图元、比例尺、图例；否则标 `not_parsed`，不得根据文件名猜测或补造。
+- PDF 抽取不出文本：该材料标 `not_parsed`，并在 `degradations` 中提示需人工读页面；不得用标题或领域标签推断内容填入正式 quote。
+- 若材料缺失或损坏：明确写 `input_error` 或 `partial`，列出缺失项。
+
+## 4. 输出契约
+
+`/app/output/` 下必须包含：
 
 | 文件 | 作用 |
 |-|-|
-| `graphical_abstract.svg` | 分层可编辑源文件（6 个命名图层，文字是 `<text>` 节点，每图元有 `id`） |
-| `graphical_abstract.pdf` | 真实矢量 PDF（1 页，12×7.6 in，Helvetica base-14 + 中文 CID 字体） |
-| `graphical_abstract.png` | 预览位图（尽力：matplotlib / pdftoppm） |
-| `content_map.json` | element_id → panel/role/text/svg_id/bbox + evidence{source,locator,quote,status} |
+| `graphical_abstract.svg` | 分层可编辑源文件；文字是 `<text>` 节点；每个关键图元有 `id`；图层命名清晰 |
+| `graphical_abstract.pdf` | 真实矢量 PDF，1 页，尺寸约 12×7.6 in，字体与文字可检查 |
+| `graphical_abstract.png` | 预览位图；若渲染失败可缺失但必须记录降级原因 |
+| `content_map.json` | `element_id → panel/role/text/svg_id/bbox + evidence{source,locator,quote,status}` |
 | `compliance_checks.json` | 画布、字号、图层、字体、色彩、覆盖率等检查结果 |
-| `result.json` | 主结果：`output_contract` 全字段 + case_id/status/sources/uncertainty/pending_human/errors/degradations/changes/runtime |
+| `result.json` | 主结果：`output_contract` 全部字段 + `case_id/status/sources/uncertainty/pending_human/errors/degradations/changes/runtime/reviewed_by_agent` |
 
-`result.json` 规则：`output_contract` 的**每个键原样保留**（语义匹配到对应产物，无对应则 `null`，不删键、不改名）；`status ∈ {ok, partial, insufficient_evidence, input_error}`。
+`result.json` 规则：
+- `output_contract` 的每个键原样保留，语义匹配到对应产物；无对应则 `null`，不删键、不改名。
+- `status ∈ {ok, partial, insufficient_evidence, input_error}`。
+- `sources` 记录实际材料路径、版本、可用 SHA1 或文件属性。
+- `changes` 记录 baseline → final 的修改。
+- `reviewed_by_agent` 记录你亲自核验了哪些内容、哪些是自动生成后保留、哪些进入 `pending_human`。
 
-## 6. 核心流程（Agent 主导）
+## 5. 本题专属执行流程
 
-```bash
-cd /app
-python3 scripts/main.py init   --input /input --work /app/work --output /app/output
-python3 scripts/main.py show   --work /app/work --grep "proton relay"      # 逐字读证据
-python3 scripts/main.py check  --work /app/work                            # 校验工作稿
-python3 scripts/main.py build  --input /input --work /app/work --output /app/output
-```
+### 步骤 0：盘点输入与读取评分要求
 
-1. **init**：打印材料清单、段落/页码 locator、workorder 摘要、contract 字段数；写出 `work/index.json` 与 partial `result.json`。
-2. **读**：读 `/input/task.md` 与 init 摘要；再用 `show --grep "<关键词>"`、`show --sid m2 --limit 10` 把要引用的句子连同 locator 抄下来。先想清楚：这张图的一句话结论是什么？哪 3–6 个事实/数值必须上图。
-3. **写工作稿** `work/plan.json`（见 §7）：由你决定分段内容、措辞、选哪些数值；脚本只负责排版与校验。
-4. **check**：只跑校验，打印 PASS/NEEDS WORK 与逐条 FAIL。必须清零后再 build：
-   - `evidence unverified` → quote 在原文找不到（改词/跨段/抄错）→ 用 `show` 重新逐字复制；
-   - `number(s) [...] not in its quote` → 图元里出现的数字不在引文里 → 换引文或删数字；
-   - `missing panel role` → 补齐 problem/method/results/implication。
-5. **build**：渲染三件套 + content_map + compliance，最终覆盖 `result.json`；无法验证的图元会被剔除并写入 `exceptions`。
-6. 汇报：`status`、图元数、被剔除数、缺口。
+- 输入：`/input/case.json`、`/input/task.md`、`/input` 下材料。
+- 动作：
+  - 读 `task.md`，标出 rubric 中权重最高的交付物：任务完成度、结果正确性、结果完整性、结果可核验性。
+  - 读 `case.json`，提取 `output_contract` 字段清单和 `case_id`。
+  - 运行：
+    `python3 /skills/weekly-skill/scripts/main.py init --input /input --work /app/work --output /app/output`
+  - 阅读 `init` 输出中的材料清单、文本抽取状态、workorder 摘要、contract 字段数。
+- 输出：`/app/work/index.json`、partial `result.json`，以及你脑内的“本案例最高优先级交付物清单”。
+- 失败分支：若 `case.json` 缺失，递归找 `case*.json`；仍无则只用 `task.md + /input` 材料，并把缺失 contract 写入 `errors`。若 `init` 命令异常，记录异常，继续用可读文件设计最小可交付方案，绝不直接放弃。
 
-## 7. `work/plan.json` 结构
+### 步骤 1：真实解析并建立证据清单
 
-```json
-{
-  "title": "Cryo-EM structure of the V-ATPase rotor reveals a proton relay switch",
-  "subtitle": "How ATP hydrolysis drives proton translocation",
-  "caption": "Single page summary; every element traces back through content_map.json.",
-  "panels": [
-    {"id": "P1", "role": "problem", "heading": "Problem", "flow": "how?",
-     "items": [
-       {"id": "E1", "kind": "text", "label": "Coupling unresolved",
-        "detail": "How ATP hydrolysis couples to proton translocation is unresolved.",
-        "evidence": {"source": "paper.pdf", "locator": "p.1 b3",
-                     "quote": "how ATP hydrolysis is coupled to proton translocation has remained unresolved"}},
-       {"id": "E2", "kind": "value", "value": "2.4-fold",
-        "detail": "lower pumping in E145Q vs wild type.",
-        "evidence": {"source": "paper.pdf", "locator": "p.4 b2",
-                     "quote": "the E145Q mutant reduced proton pumping by 2.4-fold compared with wild type"}}
-     ]}
-  ],
-  "legend": [{"label": "E145Q", "meaning": "relay mutant"}]
-}
-```
+- 输入：`init` 摘要、材料文件。
+- 动作：
+  - 先明确文本材料中谁是研究对象、方法、核心结果、结论。
+  - 用 `show --grep` 查找关键句子：机制方向、数值、基因/蛋白名、样本、条件、单位、统计口径。
+  - 抄下至少 8–20 条可引用原文片段，优先覆盖四段结构。
+  - 如果材料是 CSV，打开并读取真实数据，记录行/列与数值映射。
+  - 如果题目给出具体来源图 figure03 或图表编辑要求，定位“原图描述或来源数据”、“需要修改的数据映射”、“保留的结构”。
+- 输出：证据候选列表；可直接先写入 `/app/work/evidence_notes.md`。
+- 失败分支：找不到足够证据时，不要硬画；先进入 partial 路线：用确有的证据生成最少四段图，并标 `insufficient_evidence`。PDF 文本不可抽时，不凭标题补造，标 `degradations`。
 
-- `role` 只用 4 个：`problem` / `method` / `results` / `implication`（顺序即阅读顺序，2–4 个 panel，最好 4 个）。
-- `kind`：`text`（label 粗体 + detail）或 `value`（大字号数字/量，detail 说明条件）。
-- `flow`（可选）：写在两个 panel 之间的箭头上，表示关系（`how?`、`quantified by`）。
-- 不要写坐标：版面由脚本确定性生成（4 panel 一排，>4 切两排），同输入必得同版式。
+### 步骤 2：先落盘 baseline，保留全套基线交付物
 
-## 8. 证据与定位规范
+- 输入：`/app/work`、`/app/output`。
+- 动作：
+  - 若 `/app/work/plan.json` 不存在，为了让全套交付物尽早存在，运行：
+    `python3 /skills/weekly-skill/scripts/main.py build --input /input --work /app/work --output /app/output`
+    这会使用确定性 fallback 生成 baseline。
+  - 若 `/app/work/plan.json` 已存在，先运行 `check` 再运行 `build`，产出 baseline。
+  - 将 baseline 产物复制到 `/app/work/baseline/`：至少复制 `graphical_abstract.svg`、`graphical_abstract.pdf`、`graphical_abstract.png`（如生成）、`content_map.json`、`compliance_checks.json`、`result.json`。
+- 输出：`/app/output` 下已有完整契约文件；`/app/work/baseline` 保留原始基线。
+- 失败分支：若 `build` 异常，记录 traceback 到 `errors`，尝试修复 `work/plan.json` 后重跑一次；仍失败则保留 partial `result.json`，并尽可能用手工构建最小 SVG + PDF 作为 honest partial。
 
-- `quote` 必须是**原文逐字片段**（可跨行但不要跨段），从 `show` 输出复制；不要改写、不要拼接两段。
-- `locator` 用 `show` 打印的 locator（`p.3 b2` / `para.5`）。位置错但句子对 → 记 `relocated` 并自动改正。
-- 一个图元一个引文；`label`/`detail`/`value` 里的数字必须出现在该引文里（check 会拒收）。
-- 推断与限定词（"suggests"）保留原文语气；材料没给的不写。
-- 剔除的图元、被改正的 locator 都进 `exceptions`；缺口进 `pending_human`。
+### 步骤 3：Agent 亲自审查 baseline，构建真实可验证的 plan
 
-## 9. 质量规则（rubric → 产物）
+- 输入：`/app/output` 的 baseline 图稿、`content_map.json`、证据清单、`references/plan-schema.md`、`references/rubric-map.md`。
+- 动作：
+  - 打开 baseline SVG 的文本/PDF 预览，逐项核对：四段是否齐全；实体关系是否对；数值是否在 quote 中；图例、单位、条件是否覆盖。
+  - 依据证据与材料，写 `/app/work/plan.json`。每项必须是你能负责的 scientific judgement。
+  - 使用 `role`：`problem`、`method`、`results`、`implication`；2–4 个 panel，通常 4 个。
+  - `kind` 用 `text` 或 `value`；`value` 用于大字号数字或量，并写 detail 说明条件。
+  - 每个 item 必须有 `evidence`，且 `quote` 是逐字引用。
+  - 若有指定图表编辑工作，扩展 plan：在 relevant panel 中写清原图结构、数据映射变化、图例与单位要求。
+- 输出：`/app/work/plan.json`。
+- 失败分支：若时间不够或证据不足，宁可保留 fallback baseline 并标注 `reviewed_by_agent=false`/`pending_human`，也不要伪造完整来源。
 
-| rubric 关注 | 本 Skill 的落点 |
-|-|-|
-| 完成度 15 | 四段齐全 + 单页 + 可编辑 SVG + PDF，`compliance_checks` 记页数/尺寸 |
-| 正确性 15 | 实体/关系/数值 → 逐字 quote；方向写在 `flow`/`detail` 且来自原文 |
-| 完整性 5 | 图例、单位、条件标签、caption；缺口进 `pending_human` |
-| 可核验 5 | `content_map[].evidence` + `sources[].sha1` + `changes` + `runtime` |
-| 使用增益 25 | 一次 init→plan→check→build 出稿；改图只改 plan.json 重跑 |
-| 创新增益 15 | 证据约束排版：quote 校验 + 数字校验 + 确定性布局 |
-| 可靠体验 10 | 恒 0 退出码、partial 先落盘、单材料失败只降级该材料 |
-| 生态贡献 10 | schema、模板、图层命名、导出参数见 references/ |
+### 步骤 4：校验与终渲
 
-## 10. 图面规则（脚本执行，必要时你知道即可）
-
-- 画布 1200×760 → PDF 12×7.6 in（864×547.2 pt），单页。
-- 配色 Okabe-Ito 子集：problem `#D55E00`、method `#0072B2`、results `#009E73`、implication `#CC79A7`；**颜色不是唯一编码**——panel 头部写角色名。
-- 字号：标题 30 / panel 头 14.5 / label 13.5 / detail 11.8 / 图例 10.5（最小 ≈9）。
-- 溢出：先逐级缩字号（1.0→0.76），仍放不下按序丢 item 并记 `degradations`（status 转 partial）。
-- 图层：`background, structure, content, legend, footer, titles`（`<g id="layer-*">`）。
-
-## 11. 异常与降级
-
-| 现象 | 处置 | result.json 体现 |
-|-|-|-|
-| `case.json` 缺失/坏 JSON | 递归找 `case*.json`；仍无则只用材料 + task.md | `errors[]`，contract 字段无法回填时留空并 `status=partial` |
-| 材料抽不出文本 | 该材料 `method` 标注 not parsed，其余材料照常 | `degradations[]` + 提示人工读页面 |
-| 无 `plan.json` | build 用**确定性兜底**：从原文取 4 句覆盖四段，逐字引用 | `status=partial`、`exceptions[plan_missing]` |
-| quote 找不到 | 剔除该图元；panel 空则放 "No verified evidence" 占位 | `exceptions[element_dropped]`、`pending_human` |
-| 无 matplotlib/pdftoppm | 保留 SVG+PDF，PNG 缺省 | `degradations[]`，PDF 即导出件 |
-| 渲染/导入异常 | 捕获后仍 finalize `result.json` | `errors[]`，退出码 0 |
-
-## 12. 人工确认
-
-写进 `pending_human` 并在回复点明：材料自相矛盾、图元被剔除、合同字段无对应产物、PDF 文本不可抽、数值口径不明（sd vs sem）。不猜。
-
-## 13. 自检清单（交付前）
-
-- [ ] `check` 输出 PASS 或 FAIL 原因已解释；`coverage` ≥ 0.9。
-- [ ] `result.json` 含 `output_contract` 全部键；`status` 与实情一致。
-- [ ] `graphical_abstract.svg` 打开后文字可编辑、图层可见；PDF 单页且文字可选中。
-- [ ] `content_map.json` 每条都有 source/locator/quote/status。
-- [ ] 没有材料外的基因名、数值、单位。
-
-## 14. 最小调用示例（示例，非正式案例结果）
-
-```bash
-python3 scripts/main.py init  --input ./example/input --work ./example/work --output ./example/out
-# 读 show 输出 -> 写 work/plan.json ->
-python3 scripts/main.py check --input ./example/input --work ./example/work --output ./example/out
-python3 scripts/main.py build --input ./example/input --work ./example/work --output ./example/out
-# 出: graphical_abstract.svg/pdf/png, content_map.json, compliance_checks.json, result.json
-```
-
-示例（4 panel、6 图元、全 `verified`）与正式案例无关，仅说明接口形状。
-
-文件清单：`SKILL.md`、`scripts/main.py`（init/show/check/build）、`scripts/draw.py`（布局与 SVG/PDF/PNG 渲染）、`references/plan-schema.md`、`references/rubric-map.md`。版本 1.0.0；维护：改 schema 需同步 `check` 与 `content_map`，改版式只动 `draw.py` 的 `build_model`。
+- 输入：`/app/work/plan.json`。
+- 动作：
+  - 运行：
+    `python3 /skills/weekly-skill/scripts/main.py check --input /

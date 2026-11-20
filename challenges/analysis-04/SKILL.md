@@ -1,15 +1,204 @@
 ---
 name: data-analysis-runner
-description: Turn raw scientific tables, data dictionaries, SQLite databases and code templates into verified analysis deliverables (cleaned table, statistics with explicit calipers, figures with provenance, executed code, query results, quality report) under a strict output contract, with run logs and a re-runnable script. Use when a case supplies CSV/XLSX/JSON/SQLite data plus a task and asks for cleaning, statistics, charts, database queries or code execution with reproducible evidence.
-version: 1.0.0
+description: 面向科研数据清洗、统计、可视化、代码执行与数据库查询任务的 Skill；真实解析输入材料，生成完整可复核结果、质量证据与异常说明，严格遵循 /app/output/result.json 契约，支持预算感知和诚实降级。
+version: 1.1.0
 ---
 
 # data-analysis-runner（科研数据分析：出结果，也留计算依据）
 
-Skeleton — full documentation is written after the scripts are validated.
+## 0. 最高准则：脚本只是工具，最终交付物必须由你亲自推导和制作
 
-## 1. 用途与边界
-（待补全）
+本 Skill 自带脚本用于生成基线和可重复计算，但它们不是成品。你（Harness Agent）必须：
 
-## 2. 运行契约
-（待补全）
+1. **真实读取原始材料**：不得依据文件名、领域标签或数据集名称猜测内容；必须用解析工具实际读取 PDF/DOCX/CSV/XLSX/JSON/SQLite/图片等文件。
+2. **亲自推导与核验**：亲自核对字段映射、统计口径、缺失值处理、异常值判定、查询条件、图表坐标轴/单位/图例、随机种子、环境版本等关键证据。
+3. **亲自撰写或改写成品**：清洗表、统计结果、图表说明、代码注释、质量报告、异常说明必须由你根据实际材料完成，不能把脚本骨架或模板直接当成品。
+4. **不编造**：不确定或材料不足时，显式标注 `pending_human` / `limitations`，不伪造数据、引用、分数或软件状态。
+5. **完整性优先**：先产出全套基线交付物，再增量增强；不得删除、清空或遗漏任何契约字段；不确定时保留原产物并在 result.json 中标明 `reviewed_by_agent` 与 `change_records`。
+
+## 1. 用途与适用条件
+
+本 Skill 用于科研数据分析场景：当案例提供原始数据文件（CSV/XLSX/JSON/SQLite/PDF/DOCX/图片等）和任务说明，要求完成数据清洗、统计、可视化、代码执行、数据库查询或多步骤分析时使用。目标交付物包括：
+
+- 清洗后的可编辑表格（CSV/XLSX）
+- 统计结果（CSV/JSON）
+- 图表（PNG/PDF）
+- 可执行代码或 notebook
+- 数据库查询结果（CSV/JSON）
+- 质量与复现证据（规则表、日志、环境版本、随机种子、原始快照）
+- 异常说明（缺失、异常、失败查询、无法解释结果、待人工确认项）
+- 最终结构化结果 `/app/output/result.json`
+
+不适用于实验方案设计、机理解释和论文写作本身。
+
+## 2. 运行时契约与目录
+
+- 输入目录：`/input`
+  - `/input/case.json`：案例元数据，可能包含 `case_id`、材料路径、输出契约。
+  - `/input/task.md`：任务说明与 Runtime contract。
+  - 其他材料：PDF、DOCX、CSV、XLSX、JSON、SQLite、图片等，路径以 `case.json` 或 `task.md` 声明为准；未声明时枚举 `/input` 下非结果文件。
+- 工作目录：`/app/work`
+- 输出目录：`/app/output`
+- 必须产物：`/app/output/result.json`
+- 预算：64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理）
+- 资源限制：Skill 最多 50 个 UTF-8 文本文件、单文件 ≤500KB、总 ≤2MB、无 symlink；运行期二进制产物独立保留。
+- 退出码：任何情况下都应以退出码 0 结束，即使结果为 partial 或 failed，也必须写出合法 result.json。
+
+## 3. 输入盘点与材料解析（真实读取，禁止猜测）
+
+### 3.1 盘点输入
+
+动作：
+
+1. 读取 `/input/case.json`，提取 `case_id`、材料路径、输出契约（如有）。
+2. 读取 `/input/task.md`，提取任务要求、输出字段、评分维度、Runtime contract 中与本次运行相关的约束。
+3. 枚举 `/input` 下所有文件，列出文件名、扩展名、大小。
+4. 将材料清单写入 `/app/work/inventory.json`。
+
+失败分支：
+
+- 若 `case.json` 缺失或不可读：尝试从 `task.md` 和 `/input` 目录内容推断；仍无法确定时，使用默认输出契约，并在 result.json 的 `limitations` 中说明。
+- 若 `task.md` 缺失：以本 SKILL 和 case.json 中的信息为准。
+
+### 3.2 真实解析材料
+
+对每个材料执行以下动作，不要依赖文件名判断内容：
+
+- **PDF**：优先调用平台提供的 `pdf-text-tool` 提取文本，若不可用则用 Python 库（如 `pypdf` 或 `pdfplumber`）读取；保存提取文本到 `/app/work/parsed/`。
+- **DOCX**：用 Python `python-docx` 实际读取段落、表格；保存为纯文本/CSV。
+- **XLSX/CSV**：用 `pandas` 实际读取，记录行列数、列名、缺失值数量、重复行数、前几行样例；保存清洗前快照到 `/app/work/parsed/`。
+- **JSON**：用 `json` 加载，记录顶层键、嵌套结构、记录数。
+- **SQLite**：用 Python `sqlite3` 连接，读取 schema、表名、每张表行数、字段类型；执行必要的 `SELECT * FROM ... LIMIT 5` 查看样例。
+- **图片**：若任务要求从图片提取数据，使用 OCR 或平台提供的图像工具；若仅作展示，记录图像元数据与路径。
+
+对每个材料记录：
+
+- 原始路径
+- 解析方法
+- 行数/记录数
+- 列名/字段名
+- 缺失值统计
+- 哈希或文件签名
+- 解析摘要文件路径
+
+失败分支：
+
+- 某文件损坏或不支持：尝试备用解析器；若仍失败，将该文件标记为 `unparsable`，在 `anomalies` 中记录，继续处理其余材料。
+- 解析结果为空：标记 `empty_material`，不编造内容。
+
+## 4. 执行流程（编号步骤）
+
+### 步骤 1：盘点输入
+
+输入：`/input` 目录。
+
+动作：按 3.1 节操作。
+
+输出：`/app/work/inventory.json`、输出契约草稿。
+
+失败分支：若无法读取任何输入，进入鲁棒性降级流程（见第 6 节）。
+
+### 步骤 2：真实解析材料
+
+输入：`/app/work/inventory.json` 列出的材料。
+
+动作：按 3.2 节操作；将解析结果和摘要写入 `/app/work/parsed/`。
+
+输出：所有材料解析摘要、原始快照。
+
+失败分支：对单个材料解析失败不阻断全局；记录异常并继续。
+
+### 步骤 3：构建/核对证据
+
+输入：解析摘要、任务要求。
+
+动作：
+
+1. 根据任务要求和数据字典（如有）建立字段映射。
+2. 明确清洗规则：缺失值如何处理、重复行是否合并、异常值判定阈值、单位转换、有效数字保留。
+3. 明确统计口径：分组变量、目标变量、统计方法、前提条件检验（如正态性、方差齐性）。
+4. 记录随机种子、环境版本、依赖版本。
+5. 将规则和环境信息写入 `/app/work/evidence/rules.json` 和 `/app/work/evidence/environment.json`。
+
+输出：证据文件。
+
+失败分支：若任务未提供数据字典，从数据本身推断字段含义并显式标注假设；无法推断的标记 `pending_human`。
+
+### 步骤 4：运行基线脚本
+
+输入：`/input`、`/app/work` 中的解析与证据文件。
+
+动作：
+
+1. 先执行 `python3 /skills/weekly-skill/scripts/run_skill.py --help` 获取脚本接口。
+2. 按接口运行该脚本，通常为：`python3 /skills/weekly-skill/scripts/run_skill.py`；若脚本要求参数，按 help 传入 `--input /input --work /app/work --output /app/output` 等。
+3. 让脚本生成全套基线产物到 `/app/output`，包括清洗表、统计、图表、代码、查询结果、质量证据和初步 result.json。
+
+输出：基线产物列表、初步 result.json。
+
+失败分支：
+
+- 若脚本报错，阅读报错与脚本源码，修正参数或环境后重试。
+- 若连续 2 次失败，执行 `python3 /skills/weekly-skill/scripts/analysis_core.py --help` 获取备用接口，尝试用该脚本生成最小可用产物。
+- 若脚本仍不可用，手动创建最小全套 baseline 文件（至少包含空清洗表说明、空统计说明、空图表占位、代码文件、查询结果占位、质量证据占位），并继续。
+
+### 步骤 5：Agent 亲自增强/完成成品
+
+输入：基线产物、解析摘要、证据文件。
+
+动作：
+
+1. **逐项核验**：对照原始材料与任务要求，检查基线清洗表、统计、图表、代码、查询结果是否正确。
+2. **修正错误**：发现字段错误、口径错误、单位错误、缺失值被误当 0、未去重、前提条件未检验、图表标注不一致等问题时，立即修正。
+3. **补全可编辑产物预览**：若清洗表是 XLSX 或 Office 文档，必须额外渲染为 PDF 或 PNG；图表若为矢量格式，保留 PDF，同时尽量生成 PNG 预览。
+4. **撰写质量报告**：保存运行命令、日志、依赖版本、随机种子、原始快照、规则表，确保他人可复算。
+5. **记录变更**：每次修正均记录到 `change_records`，包括字段名、修改原因、修改前后摘要。
+
+输出：完整可复核的 deliverable 集合。
+
+失败分支：若时间或预算不足，先保留基线，标记 `partial`，在 result.json 的 `limitations` 中列出缺失项。
+
+### 步骤 6：自检 rubric
+
+输入：`/app/output` 下所有产物。
+
+动作：按本文档第 9 节对照表逐项检查；检查文件存在性、格式有效性、预览文件可打开性、result.json 字段完整性。
+
+输出：自检记录（可写在 `/app/work/self_check.txt`）。
+
+失败分支：发现缺失立即补齐；时间不足则记录并保持 partial。
+
+### 步骤 7：回填 result.json 并收尾
+
+输入：所有产物和自检记录。
+
+动作：
+
+1. 确认 `case_id` 来自 `/input/case.json` 或由材料推断。
+2. 写入 `status`：`success`（全项完成）/ `partial`（有缺失或不确定性）/ `failed`（无法完成）。
+3. 写入 `sources`：实际读取的全部文件路径列表。
+4. 写入 `uncertainty`：不确定项、假设、依赖限制。
+5. 写入 `change_records`：Agent 增强与修正的记录。
+6. 写入 `output_contract`：包含原输出契约全部字段（见第 7 节）。
+7. 写入 `/app/output/result.json`，确保 JSON 合法。
+8. 确认退出码为 0。
+
+失败分支：若 result.json 写入失败，尝试写入简化版本（至少包含 `case_id`、`status`、`output_contract` 的可用部分），并保留其他产物文件；不得以非 0 退出码结束。
+
+## 5. 预算策略（64 请求 / 900 秒 / 16384 tokens）
+
+### 5.1 预算分配建议
+
+- 盘点与解析：≤8 次请求
+- 基线运行与修复：≤5 次请求
+- Agent 亲自核验、推导与增强：≤30 次请求
+- 自检与 result.json 回填：≤10 次请求
+- 预留重试余量：≥11 次请求
+
+### 5.2 优先顺序
+
+Rubric 权重最高的交付物优先：
+
+1. **结果正确性**：清洗表、统计数字、查询结果必须与原始数据一致。
+2. **任务完成度**：题面要求的所有环节（清洗、统计、图表、代码执行、查询）必须有对应文件。
+3. **结果可核验性**：运行日志

@@ -1,25 +1,29 @@
 ---
 name: nanopub-forge
-description: 把科研论文正文拆成可独立判断真假的原子断言（atomic assertion），为每条断言绑定逐字证据片段与页码/段落/字符定位，记录来源元数据与置信度依据，并导出可机器读取的 nanopublication 结构（result.json + assertions.jsonl）。用于 Nanopublication 生成、断言拆解、证据绑定、来源追溯、结构化导出类科研阅读任务。
-version: 1.0.0
+description: 把科研论文正文拆成可独立判断真假的原子断言，为每条断言绑定逐字证据片段与页码/段落/字符定位，记录来源元数据与置信度依据，导出可机器读取的 nanopublication 结构（result.json + assertions.jsonl）。脚本是工具，最终交付物由 Harness Agent 亲自读材料、推导、撰写/制作。
+version: 2.0.0
 ---
 
 # nanopub-forge · 论文段落 → 原子断言 + 逐字证据
 
-## 1. 用途
+## 0. 执行铁律：完整性优先，脚本不是成品
+
+1. **脚本只是工具**：`scripts/main.py` 与 `scripts/verify.py` 只负责生成候选、抽取文本、校验定位。最终交付物必须由你（Harness Agent）亲自读材料、推导、撰写/制作。禁止把脚本骨架或模板直接当成品。
+2. **先跑基线，再增强**：进入任务后先运行主脚本，产出全套基线交付物（包括 `result.json`、`assertions.jsonl`、`extracted_text.json` 以及所有输出契约要求字段）。后续复核与改写只能在基线上增强，不得删除、清空或遗漏任何基线字段或产物。
+3. **完整交付优先**：提交前逐项核对「`output_contract` 字段 × 磁盘文件 × `result.json` 键」三者一致；缺任何一项先补齐再收尾。`partial` 状态必须列出缺失项。
+4. **可核验增强**：在基线产物之上，由 Agent 亲自核验关键论断、数字、引用的来源一致性，把核验结果写进 `result.json`（`verified / pending_human / conflicts`），这才是“genuinely-derived”的证据。
+
+## 1. 用途与边界
 
 输入一篇（或若干）科研材料，输出一份**逐条可判真假**的断言表：每条断言只有一个谓词，带主体、关系、宾语、极性、限定条件、**逐字证据片段**、**页码/段落/句序/字符区间**定位、来源元数据、`np_id`（可重算的去重标识）与置信度依据。
 
-适用：Nanopublication 生成（assertion/provenance/pubinfo）、断言拆解与校验、证据绑定、结构化导出、文献知识单元抽取。
+适用：Nanopublication 生成（assertion/provenance/pubinfo）、断言拆解与校验、证据绑定、结构化导出、文献知识单元抽取。  
 不适用：需要 OCR 的扫描件、需要读图表内部数值的任务（本 Skill 只登记题注位置并转人工/视觉核对）、需要联网核对 DOI 真伪的任务。
 
-## 2. 触发与边界
+触发条件：任务要求“把段落拆成断言 / 给结论配证据 / 输出可机读的 claim 表 / 追来源 / 生成 nanopublication”。  
+不触发：纯翻译、纯摘要、纯排版。摘要式输出不算完成本题。
 
-- 触发：任务要求"把段落拆成断言 / 给结论配证据 / 输出可机读的 claim 表 / 追来源"。
-- 不触发：纯翻译、纯摘要、纯排版。摘要式输出不算完成本题。
-- 边界：本 Skill 用**规则法**给出高召回候选 + 可复核定位；精度由第 6 节的 Agent 复核环与 `verify.py` 兜底。不声称达到人工金标准。
-
-## 3. 运行契约
+## 2. 运行契约
 
 | 项 | 约定 |
 |-|-|
@@ -28,16 +32,15 @@ version: 1.0.0
 | 依赖 | 仅 Python 3 标准库；离线；不依赖 CWD（用 `Path(__file__).resolve().parent`） |
 | 退出码 | **恒 0** |
 | 先落盘 | 进材料前先写一次 partial `result.json`；结束无条件 finalize 覆盖 |
-| 预算 | 默认 760s / 400 条断言上限（`--time-budget`、`--max-assertions`）；到限即降级 finalize |
+| 预算 | 默认写在脚本参数中（`--time-budget`、`--max-assertions`）；到限即降级 finalize |
+| 工作目录 | 中间文件写 `/app/work`；最终产物写 `/app/output` |
 
 调用：
 
-```bash
-python3 -B scripts/main.py --input /input --output /app/output
-python3 -B scripts/verify.py --output /app/output --patch
-```
+    python3 -B scripts/main.py --input /input --output /app/output
+    python3 -B scripts/verify.py --output /app/output --patch
 
-## 4. 输入发现（语义识别，不假设键名）
+## 3. 输入发现（语义识别，不假设键名）
 
 1. `case.json`：若不存在或解析失败，递归找 `*case*.json`；仍失败则只靠目录扫描，并在 `errors` 记录解析异常。
 2. `case_id`：依次尝试 `case_id/caseId/id/name`，再试 `case/task/meta/input` 下的同名键；都没有则用输入目录名。**原样保留，不改写**。
@@ -45,7 +48,7 @@ python3 -B scripts/verify.py --output /app/output --patch
 4. 材料：先读 case 中出现的文件路径（`/input/x` 会被展开），再递归扫描 `/input/**`，按扩展名+魔数识别 pdf / docx / xlsx / csv / tsv / md / txt / html / json / 图片。
 5. 声明了但打不开的材料 → `input_gaps`；没有文本层的材料 → `pending_human(no_text_layer)`。**不构造内容**。
 
-## 5. 输出与字段
+## 4. 输出与字段
 
 `result.json` 顶层：`skill, case_id, status, status_reason, task_understanding, inputs, sources, assertions, figures, counts, verification, uncertainty, pending_human, errors, degradations, changes, runtime, artifacts, output_contract_keys, output_contract_echo, contract_fields_present`，并把契约键平铺到顶层（同名以 Skill 结构为准，但键一定存在）。
 
@@ -55,112 +58,94 @@ python3 -B scripts/verify.py --output /app/output --patch
 
 契约回填：`output_contract` 原样按形状回填到 `output_contract_echo`（键名不改、缺失为 `null`/`[]`、未知键保留），叶子指针写入 `output_contract_keys`，`verification.contract` 给出键数与是否取到值。
 
-## 6. 核心流程（含 Agent 复核环）
+## 5. 本题专属执行流程（每步输入/动作/输出/失败分支）
 
-1. **跑主流程**：`main.py` 抽文本 → 断句 → 拆从句 → 判关系/极性/条件/量值 → 绑定逐字证据 → 去重合并 → 写 partial。
-2. **看文本层**：读 `extracted_text.json`；若某页为空或 `flags` 含 `page_*_no_text_layer`，该页结论一律不得写成事实。
-3. **复核候选**（这一步决定质量，务必做）：
-   - 对 `tier=low` / `needs_review=true` 的条目，回到 quote 所在页确认主体与关系方向；不确定就改 `readability=undetermined` 并进 `pending_human`。
-   - 补 `magnitude`、`condition`、`subject.type/object.type`；把 `other_relation` 映射到受控词表或降级。
-   - 按 `references/rules.md` §1 检查"是否真的只有一条断言"，把复合句拆开；按 §2 裁剪证据到最小充分片段。
-   - 图表只登记位置与题注，`chart_meta` 内不可读字段保持 `null` 并进 `pending_human(vision_required)`。
-4. **校验并回写**：`python3 -B scripts/verify.py --output /app/output --patch`。它会把每条 quote 重新对 `extracted_text.json` **和原始文件重新抽取的文本**各查一遍；`failures` 非空时，逐条修正或移入 `pending_human`，**不允许改原文凑命中**。
-5. **定状态**：全通过且无阻断项 → `ok`；有失败/无文本层 → `partial`；一条断言都抽不出 → `insufficient_evidence`；根本没材料 → `input_error`。
+### 步骤 1：盘点输入与契约
 
-## 7. 质量规则（rubric → 字段/检查/产物）
+- **输入**：`/input/case.json`、`/input/task.md`、`/input/**` 材料。
+- **动作**：读取 `case.json`；若不存在，搜索 `*case*.json`；仍失败则扫描目录。解析任务说明；提取 `case_id` 与 `output_contract` 形状；建立材料清单与输入缺口。
+- **输出**：`task_understanding` 草稿、`inputs` 清单、`output_contract` 结构、缺口记录。
+- **失败分支**：case.json 缺失 → 用 `task.md` + 目录扫描继续；JSON 损坏 → 保存原始错误到 `errors`，继续扫描；`output_contract` 缺失 → 使用默认 schema 并置 `assumed_contract=true`。
 
-| 评分点 | 对应字段/检查 | 产物 |
-|-|-|-|
-| 任务完成度（拆得细） | `counts.sentences_scanned / assertions_emitted / assertions_after_dedup / duplicates_merged`；每条 `kind`+单谓词 | `result.json` |
-| 结果正确性（对得上） | `evidence.quote` 逐字命中率 `counts.quote_hit_rate`；`relation/polarity` 方向；`sources.title/doi/year` 只取自输入 | `result.json` + `verify.py` 报告 |
-| 结果完整性 | 断言/主体关系/证据/定位/来源/置信度/`np_id` 七类字段齐备（`assertions.jsonl` 逐行 + `verify.py` 复核） | `assertions.jsonl` |
-| 结果可核验性 | `locator` + `json_pointer` + `char_start/end`，任何人可回到原文该页该句 | `extracted_text.json` |
-| 增益可验证 | 同一 case 与 baseline 用同一张表对比；计数在 `counts`，不自填分数 | `result.json` |
-| 创新（方法） | 关系受控词表、被动换向、否定不改向、`np_id` 确定性去重、tier 分级 | `references/rules.md` |
-| 可靠体验 | 异常全进 `errors/degradations/pending_human`；缺材料/坏 JSON 仍出合法 partial | 三场景自检 |
-| 生态贡献 | 字段字典 + 规则 + 20 条样例 + 两脚本可独立运行 | `references/*` |
+### 步骤 2：真实解析材料并生成基线
 
-## 8. 证据与定位规范
+- **输入**：材料清单。
+- **动作**：运行 `python3 -B scripts/main.py --input /input --output /app/output`，生成基线 `result.json`、`assertions.jsonl`、`extracted_text.json`。**必须真实解析材料内容**：优先使用平台提供的 PDF 文本抽取工具（如 pdf-text-tool）或系统 `pdftotext`；若不可用，由 `scripts/main.py` 内置解析器抽取。不得依据文件名或领域标签猜测/补造内容。
+- **输出**：基线产物；逐页文本缓存 `extracted_text.json`；来源、页码、段落、句子、字符区间。
+- **失败分支**：脚本启动失败 → 记录 `errors`，使用简单标准库脚本或手工构造最小合法 `result.json`，保证退出码 0；单个材料解析失败 → 只降级该材料，其他材料继续处理。
 
-- `quote` 必须是 `extracted_text.json` 对应页文本的**逐字子串**（比较时仅做空白折叠）；`match="verbatim"`。
-- `location` 四元：`page`（PDF 物理页，1 起）、`paragraph`（页内空行分块序）、`sentence_index`（页内句序）、`char_start/char_end`（规范化页文本区间）。
-- `json_pointer` 形如 `/sources/0/pages/2/text`，直接指向 `extracted_text.json`。
-- 最小充分：片段内必须同时出现主体、关系、宾语；量化断言还必须出现数值与单位；不满足就降 `tier` 或进 `pending_human`。
-- 三类可读性：`directly_read`（片段内自足）/ `inferred`（跨句指代、相对从句、题注转述）/ `undetermined`（不可解，必须同时出现在 `uncertainty` 或 `pending_human`）。
+### 步骤 3：亲自复核文本与证据
 
-## 9. 状态、不确定性与人工接管
+- **输入**：`extracted_text.json`、原始材料路径、基线 `assertions.jsonl`。
+- **动作**：逐页阅读 `extracted_text.json` 文本，确认文本层有效；对候选断言逐条或抽样复核：每条是否只有单一谓词、主体/关系方向是否正确、证据 quote 是否逐字存在于对应页（仅做空白折叠比较）；若某页文本为空或质量差，该页结论一律不写成事实。
+- **输出**：确认或修正的断言列表；`needs_review` 标记；逐字命中记录。
+- **失败分支**：材料无文本层/扫描版 → 该页只登记位置，不生成事实断言，进 `pending_human(no_text_layer / vision_required)`；引用无法在 `extracted_text.json` 定位 → `needs_review=true`，尝试回原文核对；仍失败则进 `pending_human(quote_not_traceable)`。
 
-- `uncertainty[]`：`{id, claim_id, issue, kind=conflict|not_reported|ambiguous, detail, action}`。冲突**两侧都留**，不改写任何一方。
-- `pending_human[]`：`{id, target, reason, required_action, blocking}`；`reason ∈ no_text_layer | image_no_ocr | vision_required | no_material | quote_not_traceable | ambiguous_referent`。
-- 未报告 ≠ 不存在：材料里没有的数值/图元/结论一律不写进断言，只进 `pending_human` 或 `uncertainty`。
+### 步骤 4：构建/强化证据与来源元数据
 
-## 10. 预算与断点
+- **输入**：已复核的断言、材料元数据。
+- **动作**：为每条断言裁剪最小充分证据片段；确保证据含主体、关系、宾语（量化断言含数值与单位）；补 `subject.type/object.type`、`magnitude`、`condition`、`polarity`；将 `other_relation` 映射到受控词表或降级；来源元数据只从输入实际内容提取，不填充未提供的 DOI 或分数。
+- **输出**：增强版断言列表，每条具有 `locator/json_pointer/char区间`。
+- **失败分支**：证据不足 → 降低 `tier` 或进 `pending_human(insufficient_evidence)`；材料冲突 → 两侧都留，写入 `uncertainty`。
 
-先写 partial → 逐材料 try/except → 到 `--time-budget` 或 `--max-assertions` 立即停扫并 finalize，`degradations` 记 `budget reached / prefix only`。任何时刻中断，`result.json` 都已是合法 JSON。
+### 步骤 5：产出完整成品并保留基线
 
-## 11. 异常与降级分支表
+- **输入**：增强后的结果。
+- **动作**：写回 `/app/output` 的 `result.json` 与 `assertions.jsonl`；保留基线字段，只覆盖增强内容；确保 `output_contract` 的每个字段以相同键名平铺到顶层或写入 `output_contract_echo`；若存在可编辑 Office/幻灯片/图形产物，调用渲染工具生成真实 PDF/PNG 预览并登记到 `artifacts`；否则 `artifacts` 只列 JSON 与文本文件。
+- **输出**：全套交付物。
+- **失败分支**：写盘失败 → 保留 `/app/work` 副本，状态 `partial`，错误记录。
+
+### 步骤 6：运行校验与自检
+
+- **输入**：`/app/output` 产物。
+- **动作**：运行 `python3 -B scripts/verify.py --output /app/output --patch`，逐条核对 quote 是否在 `extracted_text.json` 和原始重抽文本中逐字命中；检查 `failures`；若有失败，逐条修正或移入 `pending_human`，不允许改原文凑命中；然后再次运行，直到 `failures` 为空或所有失败已解释。
+- **输出**：`verification.json`、`verification.external`、修改后的 `result.json`。
+- **失败分支**：`verify.py` 无法运行 → 手工执行等价校验并记录到 `verification`；无法解决的失败 → 标 `partial`，对应断言 `needs_review=true`，并进 `pending_human`。
+
+### 步骤 7：回填 result.json 与契约核对
+
+- **输入**：所有产物。
+- **动作**：确保 `result.json` 包含 `case_id`（原样保留）、`status`、`status_reason`、`sources`、`assertions`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`artifacts`、`output_contract_keys`、`output_contract_echo`、`contract_fields_present`；将输出契约每个字段回填到顶层或 echo；写 `changes` 记录本次 Agent 的修正与复核数量。最终确认 JSON 合法，所有文件在 `/app/output`，退出码 0。
+- **输出**：最终 `result.json`。
+- **失败分支**：任何字段缺失 → 补默认 `null/[]/空字符串` 并记录 `missing_fields`；存在未解决的 `blocking` 项时 `status=partial`，但绝不返回非零退出码。
+
+## 6. 预算策略（64 次模型请求 / 900 秒）
+
+优先保证 rubric 权重最高的“实际效果 40 分”与“使用增益 25 分”所依赖的交付物：完整断言、逐字证据、真实来源、contract 字段全量。
+
+大致分配：
+
+- 前 3 次：盘点输入、读 `task.md` 与 `case.json`，确定契约与材料。
+- 第 4–8 次：运行主脚本，检查基线产物与契约字段是否齐全；若需补充抽取，调用外部 PDF 工具。
+- 第 9–25 次：阅读 `extracted_text.json` 与关键页原文，复核并修正断言；优先处理 `tier=low`、`needs_review=true`、量化和方向性强的条目。
+- 第 26–35 次：处理证据不足、冲突、图表人工接管、来源元数据。
+- 第 36–42 次：运行 `verify.py`，修复 `failures`。
+- 第 43–50 次：完整性自检、对照 rubric 表、补字段、写 `changes`。
+- 第 51–64 次：留作重试与意外情况。
+
+尽早落盘：脚本运行后 `/app/output` 已有 baseline；每次批量复核后写一次 `result.json`，不要最后才写。避免重复解析同一材料；使用 `extracted_text.json` 缓存；仅当 `verify.py` 失败时回原文。若接近 64 次请求或 900 秒，立即停止改进并 finalize 当前结果；`status=partial` 并记录 `budget_reached` 到 `degradations`。
+
+## 7. 隐藏案例鲁棒性与降级表
 
 | 触发 | 检测 | 处置 | 落点 |
 |-|-|-|-|
 | 无 case.json | 路径探测 + glob | 用 task.md 与目录扫描继续 | `errors` + `degradations` |
 | case.json 非法 JSON | `json.loads` 异常 | 保留错误、按扫描继续，`status=partial` | `errors` |
 | 无 output_contract | 键探测 | 用 schema 默认字段，`assumed_contract=true` | `task_understanding` |
+| 空输入 / 无材料 | 目录扫描无文件 | `status=input_error`，退出码 0，合法 result.json | `pending_human.no_material` |
 | 扫描版 PDF（无文本层） | 每页字符<50 或质量<0.55 | 不伪造文本，该页只登记、进人工 | `sources[].flags` + `pending_human` |
-| 字体编码不支持 | 抽取质量低 | 换 `pdftotext`/`pypdf`（有则用），仍差则标不可解析 | `degradations` |
-| 外部 PDF 工具缺失 | `shutil.which` / import | 回落内置 stdlib 抽取器 | `runtime.extractors` |
-| 图片材料 | 扩展名 + 魔数 | 不 OCR、不描述内容 | `pending_human(image_no_ocr)` |
+| 字体编码不支持 | 抽取质量低 | 换手 `pdftotext`/`pypdf`（有则用），仍差则标不可解析 | `degradations` |
 | 单材料解析失败 | 逐材料 try/except | 只降级该材料，其余继续 | `errors` |
+| 格式不支持 | 扩展名+魔数未知 | 不解析不编造，标记 unsupported | `pending_human` + `errors` |
 | quote 找不到 | 固化校验 | `needs_review=true` + 复核队列，**不改原文** | `verification.quote_checks.failures` |
-| 预算耗尽 | 计时/计数 | finalize 已有结果 | `degradations` |
+| 预算耗尽 | 计时/计数 | finalize 已有结果，标 `partial` | `degradations` |
+| 任何异常 | finally | 必须写出合法 `result.json` 且退出码 0 | 顶层 `status` |
 
-## 12. 自检清单（交付前）
+任何情况下都不允许返回非零退出码，不允许因校验失败而中断交付。
 
-1. `python3 -B scripts/main.py --help` 退出码 0。
-2. 造一个含 `output_contract` + 1 个材料的最小 `/input`，跑完确认：`result.json` 合法、`output_contract_keys` 非空、`assertions.jsonl` 非空、`counts.quote_hit_rate=1.0`。
-3. 空输入：`status=input_error`、退出码 0、`pending_human` 有 `no_material`。
-4. 坏 JSON：`status=partial`、`errors` 有 `json_decode`、退出码 0。
-5. `verify.py --patch` 的 `failures` 为空；否则逐条修正或转人工。
-6. 无 `__pycache__`/`.pyc`/临时文件；包内不出现预制答案。
+## 8. Rubric 维度 → 交付要求 → 自证方式
 
-## 13. 最小调用示例（示例，非正式案例结果）
-
-`/input/case.json`：`{"case_id":"demo-001","output_contract":{"claims":null,"status":null}}`；`/input/paper.pdf` 一页。
-
-```bash
-python3 -B scripts/main.py --input /input --output /app/output
-```
-
-示意输出（**示例**，取自合成测试材料，非任何评测案例）：
-
-```json
-{"assertion_id":"A0004","np_id":"urn:nanopub:<32 hex>","kind":"quantitative",
- "assertion_text":"Compound Z decreases tumour volume by 38 percent in mice [in mice]",
- "subject":{"text":"Compound Z","type":"compound"},"relation":"decreases","object":{"text":"tumour volume","type":"variable"},
- "polarity":"affirm","magnitude":{"value":"38","unit":"percent","raw":"38 percent"},
- "condition":["in mice"],
- "evidence":[{"quote":"Compound Z reduced tumour volume by 38 percent in mice after 21 days, n = 8, p = 0.01.",
-   "source_id":"S2","locator":"S2#p1/s1",
-   "location":{"page":1,"paragraph":1,"sentence_index":1,"char_start":0,"char_end":88,
-     "locator_type":"page+para+sent+char","json_pointer":"/sources/1/pages/0/text"},"match":"verbatim"}],
- "readability":"directly_read","confidence":{"score":0.72,"basis":["verbatim_quote_bound","relation_mapped"],"tier":"medium"},
- "needs_review":true,"review_reason":"medium_confidence","source_ids":["S2"]}
-```
-
-## 14. 文件清单、版本、限制与维护
-
-| 文件 | 作用 |
-|-|-|
-| `SKILL.md` | 本说明：用途、契约、流程、规则索引、异常、自检 |
-| `scripts/main.py` | 主流程：发现、契约回填、断句/拆句/关系抽取、证据绑定、导出 |
-| `scripts/verify.py` | 源侧层：材料读取（PDF/DOCX/XLSX/CSV/HTML/JSON/纯文本）+ 独立复核 CLI |
-| `references/field-dictionary.md` | 字段字典、受控词表、定位符规范 |
-| `references/rules.md` | 断言粒度、证据最小性、关系方向、去重、冲突、降级表、对照协议 |
-| `references/examples.md` | 20 条示意断言、最小示例、题集模板、已知限制 |
-
-版本：`1.0.0`（schema `np-assertion/1`）。仅标准库；无需安装。
-
-已知限制（不掩饰）：① 规则法在公式密集、长嵌套句上会漏抽或抽偏，靠 `tier`/`needs_review` 暴露而非掩盖；② 无 OCR、无视觉能力时图表内部数值恒为 `null`；③ 表格按"首行为表头"解析，合并单元格会退化；④ `np_id` 只保证本规范内确定可重算，**不是**已注册的 nanopub 服务器标识。
-
-维护：改规则 → 同步 `references/rules.md`；改字段 → 同步 `references/field-dictionary.md` 并升 schema 次版本；每次改动重跑第 12 节四步自检。
-
-提交目录根另需 `GITHUB_URL.txt`（非 Skill 运行时依赖，脚本不读取）：首行写本题作品的公开仓库/目录链接，需要指定文件时第二行写包内相对路径（如 `SKILL.md`）。该链接须用未登录浏览器验证可打开；无链接时不要填占位地址，宁缺勿造。
+| 评分维度 | 交付要求 | 自证方式 |
+|-|-|-|
+| 实际效果 / 任务完成度（拆得细） | 每条断言只有一个谓词，复合句拆开；段落不整段塞入一个字段；字段结构齐全 | `counts.sentences_scanned / assertions_emitted / assertions_after_dedup / duplicates_merged`；`assertions[]` 每条的 `kind` 与单关系 |
+| 实际效果 / 结果正确性（对得上） | 断言忠实原文，证据片段

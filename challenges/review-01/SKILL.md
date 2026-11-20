@@ -1,205 +1,254 @@
 ---
 name: paper-quality-review
-description: Source-bound quality review of a manuscript or research material. Extracts the real file (PDF/DOCX/XLSX/CSV/JSON/MD/text), segments it into addressable sentences, runs six review facets (fact & numeric consistency, citation support, method design, statistics reporting, argument chain, academic norms), verifies every quote verbatim against the extracted text, grades severity, and emits result.json + review_report.md + issues.csv. Use when asked to review, audit, referee or pre-submission check a paper, draft, thesis chapter or report and to deliver an actionable, locatable issue list.
-version: 1.0.0
+description: 面向科研论文或研究材料的可溯源质量审查 Skill。真实解析 PDF/DOCX/XLSX/CSV/JSON/MD/TXT 等材料，按事实核验、引用支持、方法设计、统计报告、论证链、学术规范六类检查项产出固定结构、可定位到原句的问题清单与可复核证据，并在证据不足或材料缺失时诚实降级。脚本只是工具，最终交付物由 Harness Agent 亲自读材料、推导、撰写与制作。
+version: 2.0.0
 ---
 
-# Paper Quality Review
+# 论文质量审查 Skill
 
-Delivers a **fixed-structure, assignable issue list** instead of a prose review: every item has a
-check item, severity, locator (source / page / paragraph / sentence / character range), verbatim
-quote, rationale, suggested fix, and an evidence trail. Quotes that cannot be found verbatim in the
-extracted text are never reported as findings — they are demoted to `pending_human`.
+本 Skill 交付固定结构、可交办的问题清单，而不是整篇评语或内容复述。每条问题必须包含检查项、严重度、原文位置、逐字引用、判断依据和修改建议。引用无法在提取文本中逐字命中时，不得作为正式问题输出，只能降级为 `pending_human`。
 
-## 1. When to use / when not
+脚本、规则、模板只负责基线提取、规则命中和格式化。最终交付物由你（Harness Agent）亲自阅读材料、核对证据、修正误报与漏报、撰写结论并回填 `result.json`。禁止把脚本骨架或模板直接当成品，禁止删除、清空或遗漏任何基线契约字段。
 
-Use for: pre-submission self-check, peer-review preparation, thesis/project deliverable review,
-re-checking a revised version, and building a to-do list for authors.
+## 1. 适用与不适用
 
-Do not use for: language polishing, translation, plagiarism/similarity detection, journal
-typesetting, or deciding acceptance. This skill finds *documented defects and gaps*; it does not
-judge novelty or scientific importance.
+适用：投稿前自查、审稿准备、学位论文或项目成果预审、修订稿复核，以及需要按事实证据逐条交办修改任务的质量审查。
 
-## 2. Runtime contract
+不适用：语言润色、翻译、查重比对、期刊排版、决定文章是否录用。本 Skill 只寻找可记录、可复核的缺陷和证据缺口，不评判新颖性或科学重要性。
 
-| Item | Value |
+## 2. 运行时契约
+
+| 项 | 要求 |
 |---|---|
-| Entry | `scripts/review.py` (Python ≥3.8, standard library only, no network) |
-| Input | `/input/case.json`, `/input/task.md`, materials anywhere under `/input/` |
-| Output | `/app/output/result.json`, `review_report.md`, `issues.csv`, `corpus.json` |
-| Exit code | always `0`; failures are reported inside `result.json` |
-| Partial first | `result.json` is written before any parsing and finalised unconditionally |
-| Budget | designed for ≤900 s / 64 model calls; rules pass takes seconds |
+| 输入 | `/input/case.json`、`/input/task.md` 及 `/input` 下全部材料 |
+| 工作目录 | `/app/work` |
+| 最终输出 | `/app/output` |
+| 必交文件 | `result.json`、`review_report.md`、`issues.csv`、`corpus.json` |
+| 退出码 | 始终为 `0`；失败写入 `result.json` 的 `errors` 与 `degradations` |
+| 预算 | 64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理） |
+| 脚本入口 | `scripts/review.py`；规则引擎和报告渲染为 `scripts/checks.py` |
+| 资源边界 | 只引用包内真实存在文件；不联网；不依赖未说明的个人文件 |
 
-```bash
-python3 scripts/review.py --input /input --output /app/output          # full run
-python3 scripts/review.py --input /input --output /app/output --merge my_findings.json
-python3 scripts/checks.py --result /app/output/result.json --corpus /app/output/corpus.json
-```
+基线命令：
 
-## 3. Input discovery (semantic, not key-based)
-
-1. `case.json` (or any `*.json` containing `output_contract` / `case_id`) is parsed; malformed JSON is
-   recorded in `errors` and the run continues with the remaining materials.
-2. `case_id` and **every** `output_contract` key are echoed verbatim; unknown keys are preserved, empty
-   values are filled by field semantics (see §5), never renamed.
-3. Materials are found by walking the input tree and classified by **suffix**, not by label: pdf,
-   docx/doc, xlsx/xls, csv/tsv, json, md, txt, tex, html, images. PDF text comes from `pdftotext`,
-   else `mutool`, else the built-in stream scanner; OOXML is read with `zipfile` + XML strip.
-4. Declared-but-absent material is listed in `input.material_gaps`; unreadable material produces a
-   degradation **and** a `pending_human` entry instead of silent skipping.
-5. Images are not OCR'd: they are listed as unread material and the dependent checks are marked
-   `not_checked` rather than guessed.
-
-## 4. Output contract
-
-`result.json` always contains:
-
-| Block | Content |
-|---|---|
-| `case_id`, `status` | `ok` / `partial` / `insufficient_evidence` / `input_error` |
-| `issues[]` | id, facet, facet_label, check_item, severity, basis_type, title, quote, locator, rationale, suggestion, confidence, review_status, verifiable_by, evidence, quote_verified, origin |
-| `review` | `summary`, `verdict`, `facet_coverage` (per check item: checked / not_checked + reason + findings), `issues_by_severity` |
-| `sources[]` | source_id, name, path, kind, engine, chars, pages, sha256 (manuscript version fingerprint), note |
-| `metrics` | issue counts by severity/facet/basis, quote totals, verified, rejected, chars, rules_fired |
-| `pending_human[]` | reason, detail, action (unverified quote, unreadable material, rejected agent finding) |
-| `unchecked[]` | check items not executed and why (never silently "passed") |
-| `uncertainty[]`, `errors[]`, `degradations[]`, `changes[]`, `runtime{}` | honest run record |
-| `contract_fill` | which contract keys were filled / defaulted / preserved |
-
-`severity`: `major` (blocks acceptance / changes the conclusion), `minor` (must be fixed, does not
-change the conclusion), `info` (suggestion). `basis_type`: `error` (verifiable defect),
-`insufficient_evidence` (needs author material), `suggestion`. `origin`: `rule` (deterministic) or
-`agent` (semantic reading).
-
-## 5. Workflow
-
-1. **Extract** → `corpus.json` (paragraphs, sentences, sections) is written; every later quote is cut
-   from this text, so evidence offsets are always reproducible.
-2. **Rule pass** → `scripts/checks.py` applies `references/rules.json`:
-   sentence rules (p-values, ±, correlation, causal wording, placeholders …) and document specs
-   (missing control / n / ethics / data availability / limitations / sections, reference-numbering
-   conflicts, exhibit numbers, sample-size conflicts, abstract-vs-body numbers).
-3. **Semantic pass (agent)** → read `corpus.json` (or the PDF), write `agent_findings.json` (schema in
-   `references/checklist.md`), rerun the script; findings are quote-verified, deduplicated, and merged
-   with `origin=agent`. Findings whose quote is not verbatim are rejected into `pending_human`.
-4. **Verify** → every quote is matched against the whitespace/punctuation-insensitive full text.
-5. **Render** → `issues.csv` + `review_report.md` (template: `references/report_template.md`).
-
-## 6. Six facets and their check items
-
-| Facet | Typical checks |
-|---|---|
-| `fact_check` | sample-size conflicts across abstract/methods/results, figure/table numbers cited but absent, abstract values missing from body, placeholders, percentages >100 |
-| `citation_support` | citation number beyond the reference list, citations without any reference list, uncited entries, duplicate/malformed entries, entries without year, external claims without a citation, future-dated citations |
-| `method_design` | missing control group, missing n, unstated randomisation/blinding, no replicates for in-vitro work, no statistical-analysis statement, missing inclusion/exclusion criteria, no sample-size justification |
-| `statistics_report` | `p = 0.000`, p without test name, significance claims without statistics, `±` without SD/SEM, correlation without effect size, means without dispersion, p-values without intervals |
-| `argument_chain` | causal wording on observational data, “proves/demonstrates” without statistics, no limitations, no comparison with prior literature |
-| `academic_norms` | missing methods/results/discussion/conclusion chapters, ethics/consent/data-availability/COI/funding/contribution statements, abstract length, keyword count, over-long title |
-
-Full item list, rationale text and thresholds: `references/rules.json` (data, editable).
-
-## 7. Evidence and locator rules (non-negotiable)
-
-- Every issue carries a `quote` cut from the extracted text plus `locator`: `source_id`, `page`
-  (null when the extractor exposes none), `section`, `paragraph_id` (`P0007`), `sentence_id`
-  (`P0007S02`), `char_start`/`char_end` (offsets in the normalised text).
-- A quote that does not match after normalisation is demoted to `pending_human`; wording is never
-  adjusted to make a quote pass.
-- Page numbers come from the extractor; when absent the field is `null` and the paragraph/character
-  range is the authoritative pointer (stated in `uncertainty`).
-- No page, figure, statistic, DOI, reference or reviewer statement is ever invented. Doc-level
-  findings quote the closest real sentence and record the full-text count in `evidence.doc_level`.
-
-## 8. Severity anchors and false-positive control
-
-- `major`: changes credibility/reproducibility/conclusion, or a submission-blocking omission.
-- `minor`: reporting or compliance gap that is fixable without new experiments.
-- `info`: improvement suggestion.
-- **Gating**: context-dependent checks fire only when their precondition holds (empirical study,
-  human/animal data, reference list present, captions present, ≥3 sections, ≥700 words). When the
-  precondition fails the item is recorded as `not_checked` with a reason instead of firing.
-- **No mass-missing when structure is unknown**: if no section headings are detectable (excerpt,
-  scanned text), chapter/statement checks are suppressed and reported as not executed.
-- Discipline conventions (formatting, style, journal-specific layout) are not defects by default;
-  they appear only as `info` suggestions with an explicit “check against target journal” note.
-- Identical quotes with the same facet are de-duplicated; each rule is capped (4 hits) to prevent a
-  single pattern from flooding the list.
-
-## 9. Exceptions and degradation branches
-
-| Situation | Behaviour |
-|---|---|
-| missing input dir / no materials | `status=input_error` or `insufficient_evidence`, error recorded, artifacts still written |
-| malformed `case.json` | error recorded, other files still reviewed, contract echoed if present |
-| PDF unreadable / no text tool | `engine=none`, degradation + `pending_human`, text checks skipped for that file |
-| DOCX/XLSX unreadable | `engine=failed`, degradation recorded, other materials unaffected |
-| images / figures | not OCR'd → `pending_human` (`material_unreadable`) + dependent checks `not_checked` |
-| text < 400 characters | `status=insufficient_evidence`, no conclusions extrapolated |
-| no section headings | degradation + chapter checks `not_checked` |
-| quote not found | issue demoted to `pending_human` (`quote_not_found`) |
-| agent findings malformed | rejected into `pending_human` with reason, run continues |
-| unexpected exception anywhere | captured in `errors` with traceback, `result.json` finalised, exit 0 |
-
-## 10. Minimal invocation example (示例，非正式案例结果)
-
-Input `/input/case.json`:
-
-```json
-{"case_id": "demo-001",
- "task_instruction": "review this manuscript",
- "output_contract": {"issues": null, "issue_count": null, "verdict": null},
- "artifacts": ["manuscript.md"]}
-```
-
-`/input/manuscript.md` contains: “Mean glucose decreased … (p = 0.000), a significant improvement.
-… TODO: add mechanism paragraph. … (Figure 5)” with no figure caption.
-
-```bash
 python3 scripts/review.py --input /input --output /app/output
-```
 
-Illustrative excerpt of the shape of the output (values are illustrative only):
+合并代理核验发现的命令：
 
-```json
-{"case_id": "demo-001", "status": "partial",
- "issues": [{"id": "MJ-001", "facet": "statistics_report", "severity": "major", "basis_type": "error",
-             "check_item": "p 值被报告为 0", "quote": "… (p = 0.000), a significant improvement.",
-             "locator": {"source_id": "S1234", "page": 1, "section": "abstract",
-                         "paragraph_id": "P0002", "sentence_id": "P0002S03",
-                         "char_start": 126, "char_end": 211},
-             "rationale": "p 值不可能精确等于 0 …", "suggestion": "改报精确值或 p < 0.001 …",
-             "quote_verified": true, "origin": "rule"}],
- "issue_count": 10, "verdict": "major_issues_present",
- "review": {"facet_coverage": {"statistics_report": {"status": "checked", "checked_items": 8, "total_items": 8}}},
- "artifacts": {"result_json": "/app/output/result.json", "review_report_md": "/app/output/review_report.md",
-               "issues_csv": "/app/output/issues.csv", "corpus_json": "/app/output/corpus.json"}}
-```
+python3 scripts/review.py --input /input --output /app/output --merge /app/work/agent_findings.json
 
-## 11. Self-check before delivery
+自检命令：
 
-1. `result.json` parses; every `output_contract` key present (`contract_fill.keys` equals the input count).
-2. `metrics.quotes_verified + quotes_rejected == quotes_total`; `quotes_rejected` items appear in `pending_human`.
-3. `status` matches reality: `ok` only when nothing is pending/unchecked.
-4. `unchecked[]` lists the checks that were skipped and why; no facet is silently empty.
-5. `review_report.md` and `issues.csv` exist and carry the same issue ids.
-6. Re-running on the same input yields the same ids/order (deterministic).
+python3 scripts/checks.py --result /app/output/result.json --corpus /app/output/corpus.json
 
-## 12. Files
+## 3. 输出契约
 
-| File | Role |
+`result.json` 必须始终包含：
+
+- `case_id`
+- `status`：`ok` / `partial` / `insufficient_evidence` / `input_error`
+- `issues[]`：每条含 `id`、`facet`、`facet_label`、`check_item`、`severity`、`basis_type`、`title`、`quote`、`locator`、`rationale`、`suggestion`、`confidence`、`review_status`、`verifiable_by`、`evidence`、`quote_verified`、`origin`
+- `review`：`summary`、`verdict`、`facet_coverage`、`issues_by_severity`
+- `sources[]`：`source_id`、`name`、`path`、`kind`、`engine`、`chars`、`pages`、`sha256`、`note`
+- `metrics`：按严重度、facet、basis、引用命中情况、规则触发数等统计
+- `pending_human[]`
+- `unchecked[]`
+- `uncertainty[]`
+- `errors[]`
+- `degradations[]`
+- `changes[]`
+- `runtime{}`
+- `contract_fill`
+
+同时必须原样回填输入 `output_contract` 的全部字段，键名不变、不得遗漏。即使某个字段缺省，也要按字段语义填充或显式标为 `defaulted`，并在 `contract_fill` 中记录。
+
+若 `output_contract` 要求可编辑 Office、幻灯片、图形产物，则除源文件外还必须额外生成真实渲染的 PDF/PNG 预览，并把路径写入 `result.json` 的 artifacts 或对应字段。
+
+## 4. 本题专属执行流程
+
+### 步骤 1：盘点输入与确认契约
+
+输入：`/input/case.json`、`/input/task.md`、`/input` 下全部材料、本 Skill 的 `references/rules.json`、`references/checklist.md`。
+
+动作：
+- 列出 `/input` 树中全部文件，按后缀识别类型，不按文件名或领域标签猜测内容。
+- 解析 `case.json`，提取 `case_id`、`task_instruction`、`output_contract` 的全部键；若 JSON 损坏，把错误记入 `errors`，继续处理其余材料。
+- 识别材料文件与格式：PDF、DOCX/DOC、XLSX/XLS、CSV/TSV、JSON、MD、TXT、TeX、HTML、图片等。
+- 把材料清单与契约键保存到 `/app/work/input_inventory.json`，便于后续核对。
+
+输出：材料清单、契约键列表、待解析文件队列。
+
+失败分支：
+- `/input` 不存在、为空或没有任何材料：`status` 设为 `input_error` 或 `insufficient_evidence`，仍写合法 `result.json`，退出码 `0`。
+- `case.json` 损坏或缺少 `output_contract`：记录错误，继续解析其他文件；`contract_fill` 中标记缺失字段为默认或待定。
+
+### 步骤 2：真实解析材料
+
+输入：步骤 1 的待解析文件队列。
+
+动作：
+- 对 PDF 使用 `pdftotext`，不可用则 `mutool`，再不可用则内置流扫描器；提取文本、段落、句子、章节、页码（若可提取）和字符偏移。
+- 对 DOCX/XLSX 使用 `zipfile` 与 XML 剥离读取文本；对 CSV/TSV、JSON、MD、TXT、TeX、HTML 按相应方式读取。
+- 生成 `/app/output/corpus.json`，包含段落、句子、章节、来源文件、页码和字符范围，保证后续每条引用可回到提取文本。
+- 同时记录每个材料的 SHA-256、字符数、页数、解析引擎和状态。
+
+输出：`corpus.json`、`sources[]` 基础信息、解析状态。
+
+失败分支：
+- 文件不可读、损坏或格式不支持：在 `degradations` 中记录，在 `pending_human` 中增加 `material_unreadable` 条目，并将依赖该材料的检查项标为 `not_checked`。
+- 图片不进行 OCR：列为未读材料，相关图表检查标 `not_checked`，绝不猜测内容。
+- 全文少于 400 字符：`status` 设为 `insufficient_evidence`，不再推断任何结论。
+
+### 步骤 3：运行基线脚本，产出全套交付物
+
+输入：`/input`、`/app/output`。
+
+动作：立即执行：
+
+python3 scripts/review.py --input /input --output /app/output
+
+该脚本会产出基线版 `result.json`、`review_report.md`、`issues.csv`、`corpus.json`，并完成规则命中、引用验证、报告渲染和契约回填。
+
+输出：完整基线文件。
+
+失败分支：
+- 脚本异常：把 traceback 写入 `errors`，若 `result.json` 未生成则手工构造一个合法 `result.json`，至少包含 `case_id`、`status`、`issues`、`review`、`sources`、`metrics`、`pending_human`、`unchecked`、`uncertainty`、`errors`、`degradations`、`changes`、`runtime`、`contract_fill`，并保留已生成的任何中间文件。退出码仍为 `0`。
+
+重要：该基线是后续增强的基础，任何情况下都不得删除、清空或遗漏这些文件和契约字段。即使后续发现基线存在误报或漏报，也只能在基线之上增补 `origin=agent` 的条目或在 `changes` 中记录修正，不能用新文件替代基线。
+
+### 步骤 4：Agent 亲自复核与增量增强
+
+输入：`/app/output/corpus.json`、基线 `result.json`、原始提取文本或可读原文。
+
+动作：
+- 随机或按风险排序抽查规则发现：逐字核对 `quote` 与提取文本是否一致；检查 `locator` 是否指向正确段落/句子/字符范围；检查 `severity` 是否与定义一致。
+- 对六大类检查项中脚本可能漏掉的高价值缺陷进行语义审查：事实/数字一致性、引用支持、方法设计、统计报告、论证链、学术规范。
+- 对脚本可能产生的误报进行修正：如果某条规则命中是学科写作惯例或作者有意取舍，应在 `changes` 中记录并降级为 `info` 或剔除，同时说明理由。
+- 将新增或修正写为 `/app/work/agent_findings.json`，格式遵循 `references/checklist.md` 中的 agent findings schema。
+- 执行合并：
+
+python3 scripts/review.py --input /input --output /app/output --merge /app/work/agent_findings.json
+
+合并后，脚本会再次进行引用验证、去重、合并与重排序；无法逐字命中的发现会被拒绝并进入 `pending_human`。
+
+输出：包含 `origin=agent` 条目的更新版 `result.json`、`review_report.md`、`issues.csv`。
+
+失败分支：
+- `agent_findings.json` 格式错误：脚本拒绝该文件并记录到 `pending_human`，基线产物不受影响。
+- Agent 因预算不足未能完成语义审查：必须保留基线，并在 `changes` 中如实说明 agent review 未完成或只核验了部分条目；不得伪装成已完成。
+
+如果 Agent 核验后没有新增或修正，也必须至少记录一条 `changes`，说明核验范围、核验时间、基于 `corpus.json` 的检查项和结论，例如：`agent_reviewed=true`、核验了哪些 facet、未发现需修改的规则发现。
+
+### 步骤 5：自检 rubric 与覆盖度
+
+输入：更新版 `result.json`、`corpus.json`、`review_report.md`、`issues.csv`。
+
+动作：
+- 执行：
+
+python3 scripts/checks.py --result /app/output/result.json --corpus /app/output/corpus.json
+
+- 核对 `review.facet_coverage`：事实核验、引用支持、方法设计、统计报告、论证链、学术规范等与当前材料相关的 facet 是否都已被覆盖；未覆盖的必须出现在 `unchecked[]`，不能静默视为通过。
+- 核对 `metrics` 中 `quotes_verified + quotes_rejected == quotes_total`；所有 rejected 条目都出现在 `pending_human`。
+- 核对 `issues.csv` 与 `review_report.md` 是否与 `result.json` 的 issue id 一致且都存在。
+- 核实磁盘文件与 `output_contract` 字段一一对应：每个要求的产物都有对应路径或字段，缺失项立即补齐。
+
+输出：自检结果、缺失项清单。
+
+失败分支：
+- 自检发现字段或文件缺失：优先补齐，再更新 `contract_fill`、`unchecked`、`changes` 后重新检查。
+- 某个 facet 因材料限制无法检查：在 `unchecked[]` 中说明原因，如“无参考列表”“无统计说明”“无章节结构”等；绝不虚假覆盖。
+
+### 步骤 6：最终回填并退出
+
+输入：自检通过或可接受的 `result.json`。
+
+动作：
+- 确保 `result.json` 包含 `case_id` 与 `output_contract` 的全部键。
+- 更新 `status`：当且仅当没有 `pending_human`、没有 `unchecked`、没有错误或降级时才能设为 `ok`；否则使用 `partial` 或 `insufficient_evidence`。
+- 更新 `review.summary`、`verdict`、`metrics`、`changes`、`runtime` 等，反映真实运行过程。
+- 记录所有关键文件路径到 artifacts 字段；若 contract 要求 Office/幻灯片/图形产物，确认真实渲染的 PDF/PNG 预览已生成并记录路径。
+- 最后以退出码 `0` 结束。
+
+失败分支：
+- 遇到任何未预期的异常：捕获并写入 `errors`，保留已生成的合法 `result.json`，退出码仍为 `0`。
+
+## 5. 预算策略
+
+总额：64 次模型请求 / 900 秒。模型请求只用于需要语义理解或判断的步骤，脚本运行不占模型请求。
+
+建议分配：
+
+- 步骤 1 盘点输入、确认契约：1–2 次模型请求，只需阅读 `case.json` 与 `task.md` 摘要，不逐字阅读全文。
+- 步骤 2 材料解析：0 次模型请求，全部由脚本执行。
+- 步骤 3 基线运行：0 次模型请求，脚本执行。
+- 步骤 4 Agent 复核与增强：每个材料最多 3 次请求，每次聚焦一个高价值 facet 或一类关键证据；单个案例最多 10–15 次。优先复核规则命中数量最多的 facet，并核验任何可能影响结论的 `major` 条目。
+- 步骤 5–6 自检与回填：2–4 次模型请求，用于处理自检发现和写最终结论。
+
+优先级：
+
+1. 必须先产出完整基线：`result.json` + `issues.csv` + `review_report.md` + `corpus.json`，一旦生成即视为诚实 partial。
+2. 再选择高价值增强：数字/引用/方法/统计中风险最高的条目进行 Agent 核验。
+3. 预算不足时跳过低价值增强，但要保留基线并如实记录未完成部分。
+
+禁止：
+
+- 重复通读同一完整材料；
+- 为同一问题反复生成新发现；
+- 消耗模型请求进行无意义格式检查或简单文本替换。
+
+## 6. 六类审查 facet
+
+| facet | 典型检查项 |
 |---|---|
-| `SKILL.md` | this contract |
-| `scripts/review.py` | extraction, corpus, merge, contract echo, artifact writing (≤20 KB) |
-| `scripts/checks.py` | rule engine, coverage, quote verification, report renderer (≤20 KB) |
-| `references/rules.json` | rule table, severity anchors, section vocabulary, profile regexes |
-| `references/report_template.md` | report skeleton (`{{placeholders}}` filled at run time) |
-| `references/checklist.md` | the six facets, item definitions, agent-findings schema, FP rules |
+| `fact_check` | 摘要/方法/结果间样本量冲突、图/表编号引用但缺失、数据前后不一致、占位符、明显数据错误 |
+| `citation_support` | 引文编号超出文献表、有引用却无文献、未引用条目、引用格式错误、无年份、未来日期引用、外部主张无引用 |
+| `method_design` | 缺对照组、缺样本量、未说明随机化/盲法、体外实验无重复、统计分析方法缺失、纳入排除标准缺失、样本量无理由 |
+| `statistics_report` | `p = 0.000`、p 未说明检验方法、无统计量、无效应量、均值无离散度、p 未给置信区间 |
+| `argument_chain` | 观察性数据使用因果措辞、无统计支持却写“证明/证明性”、无局限性讨论、未与先前文献比较 |
+| `academic_norms` | 缺方法/结果/讨论/结论、伦理/同意/数据可用/利益冲突/基金声明缺失、摘要过长、关键词数量不符、标题过长 |
 
-## 13. Maintenance
+完整规则、阈值、触发条件见 `references/rules.json` 和 `references/checklist.md`。严重度定义：
 
-- Rules are data: edit `references/rules.json` (`rules[]`, `specs[]`, `computed{}`), no code change.
-- Add a check: append a spec with `applies` + `fire` (`absent` / `absent_section` / `stat_true` /
-  `stat_false` / `none_stat` / `count_not_between` / `list_count`) and a `quote` pattern.
-- Keep both scripts ≤20 KB, standard library only, no CWD assumptions (paths derive from `__file__`).
-- Version bumps: update `version` here and in `rules.json`; result.json records `skill.version`.
+- `major`：改变可信度/可重复性/结论，或属于投稿阻断性缺失。
+- `minor`：报告或合规缺陷，可在不改做实验的情况下修复。
+- `info`：改进建议。
+
+`basis_type`：`error` 为可验证缺陷，`insufficient_evidence` 为证据不足，`suggestion` 为建议。`origin`：`rule` 为确定性规则命中，`agent` 为 Agent 语义阅读后新增或修正。
+
+## 7. 证据与误报控制
+
+- 每条 problem 必须有 `quote`，且该 quote 必须能在 `corpus.json` 或提取文本中经过空白/标点归一化后逐字命中。不能命中则自动降级为 `pending_human`，不能修改原文使其通过。
+- `locator` 必须包含 `source_id`、`page`（若无则为 `null`）、`section`、`paragraph_id`、`sentence_id`、`char_start`、`char_end`。
+- 页码来自解析工具，缺省时以段落/句子/字符范围为权威定位，并在 `uncertainty` 中说明。
+- 不编造页码、图号、统计量、DOI、参考文献或审稿意见。文档级缺陷必须引用最近的真实句子，并在 `evidence.doc_level` 记录全文计数。
+- 上下文相关规则只在满足前提条件时触发（如实证研究、使用人类/动物数据、存在文献表、存在图表标题、章节数≥3、全文≥700 词）。前提不满足时标记 `not_checked` 而非通过。
+- 如果无法识别任何章节标题（如扫描版或摘要片段），章节和声明类检查应抑制并记录为未执行。
+- 学科写作惯例、格式差异或期刊特有要求默认不作为缺陷；最多作为 `info` 建议，并注明“核对目标期刊”。
+- 相同引文和相同 facet 的条目应去重；每条规则设上限（例如 4 条命中），防止单一模式灌满清单。
+
+## 8. 隐藏案例鲁棒性
+
+任何情况下都要产出合法 `result.json` 且退出码 `0`。
+
+| 异常情况 | 处理方式 |
+|---|---|
+| `/input` 不存在、为空或无材料 | `status=input_error` 或 `insufficient_evidence`；写错误，仍在 `/app/output` 生成合法文件，退出 `0` |
+| `case.json` 损坏或缺少 `output_contract` | 错误记入 `errors`，继续解析其他材料；契约字段按语义默认或标记默认 |
+| 材料损坏或格式不支持 | `degradations` 记录，材料不用于证据；依赖该材料的检查标 `not_checked` |
+| PDF 无文本层 | 尝试 `pdftotext`、`mutool`、内置扫描器；仍失败则 `engine=none`，加 `pending_human`，文本检查跳过该文件 |
+| 图片或不可读图表 | 不 OCR；标记 `material_unreadable`，图表相关检查 `not_checked` |
+| 全文少于 400 字符 | `status=insufficient_evidence`；不推断结论 |
+| 无章节标题 | 章节结构检查 `not_checked`；在 `unchecked` 中说明 |
+| 超时或预算不足 | 立即保存已有的合法 `result.json`，状态设为 `partial`，在 `changes` 和 `unchecked` 中说明未完成部分 |
+| 引用无法逐字命中 | 条目降级到 `pending_human`，状态为非 `ok` |
+| Agent findings 格式错误 | 拒绝并记入 `pending_human`，基线不受影响 |
+| 意外异常 | 捕获全部异常，写入 `errors` 和 `degradations`，保留合法 `result.json`，退出 `0` |
+
+诚实性要求：`status`、`sources`、`uncertainty`、`changes`、`pending_human`、`unchecked` 必须反映真实运行状态。不确定或材料不足要显式标注，不得编造数据、引用、分数或软件状态。可为空数组，但不得假装不存在。
+
+## 9. 评分维度与交付自证对照
+
+| 评分维度 | 交付要求 | 自证方式 |
+|---|---|---|
+| 实际效果：任务完成度 | 固定结构、可交办
