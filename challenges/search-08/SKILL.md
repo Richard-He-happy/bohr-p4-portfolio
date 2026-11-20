@@ -1,207 +1,353 @@
 ---
 name: systematic-screening-audit
-description: Run an auditable systematic literature screening on an organizer record snapshot — criteria operationalization with version fingerprint, query log, DOI/title/fuzzy dedup with merge basis, title/abstract inclusion-exclusion with reason codes and verbatim evidence quotes, dual-annotator conflict arbitration, count-closure audit chain, and reusable label/arbitration/audit export. The Harness Agent must read actual input materials, verify and derive the final deliverable; scripts are tools only.
-version: 2.0.0
+description: "Deterministic, auditable systematic literature screening skill for finite bibliographic snapshots: criteria operationalization and version fingerprinting, query logging, DOI/title/fuzzy deduplication with merge evidence, title/abstract screening with reason codes and verbatim evidence locators, dual-annotator conflict arbitration, count-closure audit, and reusable CSV/JSON/audit exports. Agent reads real inputs and may inject a draft; the script provides a deterministic fallback and selfcheck under one run command."
+version: 3.0.0
 ---
 
 # systematic-screening-audit
 
-## 0. 给 Harness Agent 的总指令（必读）
+## 0. Harness Agent 必须先读（最高优先级）
 
-本 Skill 用于把科研问题、检索约束和题录快照转换成可审计的系统性筛选结果。最终交付物由你（Harness Agent）**亲自阅读 /input 下的真实材料、逐条推导、逐段核验后撰写/制作**。`scripts/main.py` 和 `scripts/verify.py` 只是确定性工具，用来快速生成基线产物、检测引用片段真伪、审计计数闭合，**不能把脚本骨架、空模板或未核对的默认输出直接当作成品**。
+你是在 `/skills/weekly-skill` 下被加载的技能。本题输入是有限快照：固定研究问题、真实署名论文、实际查询输入与全记录筛选；不进行联网检索，不声称全局召回，不虚构人类评审。search09 中的合成重复导出与冲突意见是输入 fixture，不是预期答案。
 
-你必须做到：
+必须真实读取 `/input` 下的 `case.json`、`task.md` 和全部材料文件；PDF 必须按实际 PDF 解析，不得按文件名、领域标签或预提取答案层假设内容。所有文献、标签、证据、去重依据、仲裁结论都必须回溯到原始材料中的真实片段。
 
-- 真实读取 `/input/case.json`、`/input/task.md` 以及所有材料文件（PDF/DOCX/CSV/JSON/图片等），不得依据文件名、领域标签或记忆猜测内容。
-- 先运行基线脚本产生全套交付物，然后在此基础上做 **Agent 核验与增量增强**，不得删除或清空基线产物。
-- 所有标签、理由码、证据引用、去重合并依据、冲突仲裁结论，都要能回溯到原始材料中的真实片段。
-- 遇到材料缺失、格式不支持、字段不全、编码乱码、计数不闭合等情况，必须诚实标注 `pending_human`、`limitations`、`errors` 或 `degradations`，不得补造文献、数据、引用、分数。
-- 任何情况下都要在 `/app/output` 写出合法 `result.json`，并保持退出码 0。
+本技能的基线结构化产物由 `scripts/main.py` 确定性生成。你（Agent）的职责是：阅读、核验、通过 `/app/work/draft.json` 注入更优判断，并撰写/改写文本型交付物。禁止手工篡改结构化 JSON/CSV 的键名和结构。任何异常、部分失败、材料缺失情况下也必须生成合法 `result.json` 并退出码 0。
 
-## 1. 用途与范围
+---
 
-**用途**：输入一个科研问题、纳入/排除标准、检索约束和一组题录快照（JSON/JSONL/CSV/TSV 等），输出可追溯的候选文献集、逐条纳入/排除标签、理由码、真实证据片段、去重合并依据、双标注者冲突仲裁记录、计数闭合审计链，以及可复用标签表/仲裁表/查询日志/审计日志。
+## 1. 用途与边界
 
-**范围内**：检索协议日志、题录去重、标题与摘要筛选、标准版本管理与指纹、双规则配置冲突仲裁、审计链生成、流程指标计算、结果可核验导出。
+### 用途
+输入科研问题、纳入/排除标准、检索约束和一批题录快照，输出可追溯的筛选闭环：候选集、排序/筛选结果、逐条纳入/排除标签、理由码、证据片段与定位符、去重合并依据、双标注者冲突仲裁、计数闭合审计链，以及可复用导出表。
 
-**范围外**：全文精读、质量评价、数据提取、统计分析、论文写作；不声称全局召回，不进行实际数据库联网；不替代研究者对边界文献的最终科学判断。
+### 范围内
+- 检索协议与查询日志
+- 题录去重：DOI、归一化标题、模糊标题、第一作者、年份窗口
+- 标题/摘要纳排判据落表
+- 双规则/双标注者冲突识别、类型分类与固定优先级仲裁
+- 审计链与计数闭合
+- 标准版本管理与指纹
+- 可核验导出：`result.json`、CSV、审计 JSON、验证报告
 
-## 2. 运行时契约与输入输出
+### 范围外与禁止事项
+- 不替代研究者最终科学判断
+- 不做全文精读、质量评价、数据提取、统计分析、论文写作
+- 不声称全局召回、不实际联网
+- 不伪造人类评审、不补造文献或引用
+- 不自造金标准、不自我打分、不伪造 baseline 或 benchmark
+- 不依据文件名、领域标签或 case 标签猜测源内容
+
+---
+
+## 2. 运行时契约与预算
 
 | 项 | 约定 |
 |---|---|
-| 输入目录 | `/input`（只读）：`case.json` + `task.md` + 材料文件（`artifacts/` 或根目录下） |
-| 工作目录 | `/app/work`：你的笔记、中间文件可写在这里，不影响最终交付 |
-| 输出目录 | `/app/output`：最终实际结果和可编辑产物必须放这里 |
-| 必备结果 | `result.json`，必须包含原 `output_contract` 的全部字段（键名不改）和 `case_id` |
-| 预算 | 64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理） |
-| 退出码 | 所有路径下都必须为 0，即使任务部分失败 |
+| 输入目录 | `/input`，只读，含 `case.json`、`task.md` 和材料文件 |
+| 工作目录 | `/app/work`，可写中间文件、笔记、`inventory.json`、`draft.json` |
+| 输出目录 | `/app/output`，最终交付物必须落在此处 |
+| 必备结果 | `/app/output/result.json`，含原 `output_contract` 全部字段和 `case_id` |
+| 执行预算 | 64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理） |
+| 退出码 | 所有成功、部分成功、异常路径都必须为 0 |
+| 文件约束 | 至多 50 个 UTF-8 文本文件；单文件 ≤ 500KB；总大小 ≤ 2MB；无符号链接 |
+| 运行时依赖 | 纯标准库、离线、Python ≥ 3.8 |
 
-`result.json` 应包括的字段见第 8 节；详细 schema 见 `references/io-schema.md`。可编辑 Office/幻灯片/图形产物必须额外生成**真实渲染的 PDF/PNG 预览**，方便检查。
+`result.json` 必须包含全量契约字段，且契约字段在 **顶层** 和 **nested `output_contract`** 中各出现一次。还须包含 `status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`。
 
-必须先真实解析材料，不得仅靠脚本推断材料内容；脚本运行失败时，你仍要基于已读取的内容手写合法结果并标注限制。
+---
 
-## 3. 本题专属执行流程（必须按顺序完成）
+## 3. 单命令全流程入口
 
-### 步骤 1：盘点输入与任务要求
+### 3.1 主命令
 
-- **输入**：`/input` 目录。
-- **动作**：
-  1. 列出 `/input` 目录全部文件，记录文件名、大小、扩展名。
-  2. 读取 `/input/case.json` 与 `/input/task.md`，找出 `output_contract`（如果有）、研究问题、纳入/排除标准、检索范围、题录文件路径或内嵌记录。
-  3. 识别所有材料文件（PDF/DOCX/CSV/JSON/JSONL/TSV/图片等），不要依据文件名判断内容。
-- **输出**：在 `/app/work/run_notes.md` 写一份简短工作清单：问题、标准、记录来源、材料路径、契约字段。
-- **失败分支**：
-  - 若 `/input/case.json` 不存在或 JSON 非法，寻找其他 `case*.json`；仍缺失或不可解析，则生成最小合法 `result.json`：`status: "input_error"`，`errors` 写清原因，契约未知用 `[]`/`{}` 回填，退出码 0。
-  - 若 `task.md` 缺失，不阻断；从 case.json 提取任务信息继续。
+```bash
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
+```
 
-### 步骤 2：运行基线脚本，先落盘全套基线
+该命令是唯一主入口，内部执行 `init → build → selfcheck`：
 
-- **输入**：已确认的 `/input` 与 `/app/output` 目录。
-- **动作**：执行
-  `python3 scripts/main.py -i /input -o /app/output`
-  该脚本会解析输入、生成 criteria、查询日志、去重、筛选标签、仲裁表、审计记录、候选文献，并写出：
-  - `result.json`
-  - `candidates.csv`
-  - `screening_labels.csv`
-  - `arbitration.csv`
-  - `query_log.json`
-  - `dedup_log.json`
-  - `audit.json`
-- **输出**：基线全套产物。
-- **失败分支**：
-  - 若脚本异常崩溃或无法运行，不得清空 `/app/output`；改用你已读取的真实材料，在 `/app/output/result.json` 手写最小合法结果，记录 `errors` 与 `degradations`，退出码 0。
-  - 如果只是个别材料格式不支持，脚本可能跳过并记录；你要保留这些记录，不要删除。
+1. **init**：盘点 `/input` 全部材料，分配来源编号 `[S#]`，抽取候选记录，识别字段别名，读取 `output_contract`，识别重复候选和冲突记录，生成 `/app/work/inventory.json`。
+2. **build**：
+   - 若 `/app/work/draft.json` 存在且合法，优先使用其中判断；
+   - 若不存在或无效，则用 init 台账执行确定性抽取，生成实质工作稿：逐字 quote + locator + 理由码；
+   - 渲染全部产物，写 `/app/output/result.json`；
+   - 若使用了确定性兜底，必须在 `result.json.degradations` 中记入 `AUTO_EXTRACT`，并说明范围。
+3. **selfcheck**：校验 output_contract 键、证据引用逐字性、计数闭合、去重簇完整性、仲裁行合法性；输出 `/app/output/verification_report.json`。
 
-### 步骤 3：真实解析材料并核对证据基础
+Agent 首次行动可以只运行主命令获得全套合法基线；主命令执行后 `/app/output/result.json` 必须已经合法存在。
 
-- **输入**：`/input` 下所有材料文件；步骤 2 的基线输出。
-- **动作**：
-  1. 对 PDF 使用 `pdf-text-tool` 等真实解析；对 DOCX 使用相应工具解析；对 CSV/TSV 使用可用的 Python 解析或直接读取；对图片若有文字，用 OCR 工具但需在结果中说明 OCR 不确定性。
-  2. 读取原始题录记录，逐字段核对 `title`、`abstract`、`doi`、`authors`、`year`、`venue`、`source_db`、`query_id`、`retrieved_at` 等；注意字段别名可能不同。
-  3. 核对纳入/排除标准，确认标准版本、标题摘要原文是否与基线 criteria 一致。
-  4. 查看基线输出的 `query_log.json`、`dedup_log.json`、`screening_labels.csv`，确认它们引用的记录数和字段与原始记录一致。
-- **输出**：在 `/app/work/run_notes.md` 更新核对结果，记录哪些来源已核验、哪些存在编码/字段/解析问题。
-- **失败分支**：
-  - 某材料损坏、无法解析或格式不支持：保留该路径，记录到 `errors`/`degradations`，相关记录标记 `pending_human`；继续处理其余材料。
-  - 题录为空或没有合法记录：生成 `insufficient_evidence` 状态，不编造候选文献。
+### 3.2 Agent-first 双路径
 
-### 步骤 4：Agent 亲自核验与推导筛选结果
+#### Agent 路径
+- 先运行一次主命令，或使用可用的 `init` 子命令，查看 `/app/work/inventory.json`。
+- 读取实际原文。
+- 把逐条判断、证据、理由码、去重/仲裁判断写入 `/app/work/draft.json`。
+- 再次运行主命令，让 build 优先采用 draft.json。
+- 不得直接手工改写 `/app/output` 下的结构化 JSON。
 
-- **输入**：基线输出文件与原始材料。
-- **动作**：
-  1. 打开 `screening_labels.csv`、`arbitration.csv`、`dedup_log.json`、`candidates.csv`。
-  2. 对每一条 **纳入/排除/待人工确认** 的记录，至少核对：理由码是否匹配标准条目；`evidence` 引用是否为标题或摘要中的逐字片段；去重合并依据是否合理、是否有误并；冲突结论是否符合优先级规则。
-  3. 重点核验边界记录、低覆盖记录、无摘要记录、DOI 缺失记录、冲突僵持记录。如果发现脚本判断与标准要求不一致，将你的推断和依据写入 `result.json` 的 `agent_review` 字段（例如 `verification` 列表），并更新 `changes` / `errors`。
-  4. 如果你修正了任何标签、理由码或证据片段，必须同步更新对应的 CSV 文件，并保证 `screening_labels.csv` 与 `result.json.counts` 闭合。
-  5. 将核验情况写入 `result.json`：例如 `sources` 列出实际读取的材料路径；`uncertainty` 说明哪些边界未决；`pending_human` 列出需要研究者确认的项；`changes` 记录脚本输出与你的核验之间的变更。
-- **输出**：一套经过 Agent 核验并增强的筛选结果，不删除基线产物。
-- **失败分支**：发现严重不一致但无法立刻解决，保留原记录，在 `errors` 和 `pending_human` 中说明；不要让矛盾静默存在。
+若脚本暴露 `check` 子命令，可在最终阶段使用；主命令失败时运行一次独立 check 并输出验证报告，仍退出 0。
 
-### 步骤 5：产出最终文件与预览
+#### 无 draft 时确定性兜底
+- build 必须使用 init 台账确定性抽取出实质工作稿，不得输出空骨架。
+- 每条关键判断必须有逐字 quote 和 locator。
+- 自动抽取结果在 `degradations` 中诚实登记 `AUTO_EXTRACT`。
+- 与 Agent 路径产出的结构完全一致：同一套产物文件、同一份 `result.json` 契约。
 
-- **输入**：步骤 4 更新后的输出目录。
-- **动作**：
-  1. 确认 `/app/output` 下所有承诺交付文件均存在（见第 8 节）。
-  2. 若存在可编辑 Office/幻灯片/图形产物，用可用工具生成真实渲染的 PDF/PNG 预览，放在 `/app/output` 并为预览文件命名清晰。
-  3. 核对 CSV 行数与 `result.json` 中的 counts、审计等式是否一致。
-- **输出**：完整、可检查的最终产物集合。
-- **失败分支**：若无法生成预览，例如缺少 LibreOffice/工具，记录到 `degradations`，并说明预览缺失原因；不要伪造预览文件。
+---
 
-### 步骤 6：最终自检与回填 result.json
+## 4. 标准执行流程
 
-- **输入**：`/app/output` 全部交付物。
-- **动作**：
-  1. 运行
-     `python3 scripts/main.py --check -i /input -o /app/output`
-     它会重新证明契约键、证据引用逐字性、计数等式、去重簇完整性、仲裁行合法性等，并生成 `verification_report.json`。始终退出 0。
-  2. 对照第 6 节 rubric 映射表与第 7 节自检清单逐项检查。
-  3. 回填 `result.json`：确保所有 `output_contract` 字段、`case_id`、`status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime` 均存在且真实。
-- **输出**：最终合法 `result.json`。
-- **失败分支**：若 `--check` 发现错误，优先修复脚本输出与你手动修改之间的不一致；如果无法修复，记录到 `errors` 并保证 `status` 如实为 `partial` 或 `input_error`，仍退出 0。
+### 步骤 1：盘点输入与契约
 
-## 4. 预算策略
+1. 列出 `/input` 全部文件，记录文件名、大小、扩展名。
+2. 读取 `/input/case.json`、`/input/task.md`。
+3. 提取研究问题、纳入/排除标准、检索范围、`output_contract`、题录文件路径或内嵌记录。
+4. 在 `/app/work/run_notes.md` 写下工作清单。
 
-总预算为 64 次模型请求、900 秒。请按以下优先级分配：
+若 `case.json` 不存在或非法，尝试其他 `case*.json`；仍缺失或不可解析，则生成最小合法 `result.json`：`status: "input_error"`、`errors` 写明原因、未知契约用 `[]/{}` 回填，退出码 0。
 
-| 步骤 | 建议请求数 | 优先级 | 说明 |
-|---|---|---|---|
-| 1. 盘点输入 | 1–3 | 必须 | 只读取必要文件，不要重复读取大材料 |
-| 2. 运行基线脚本 | 1 | 必须 | 脚本本身耗时为秒级，不占 token；立即得到全套基线 |
-| 3. 真实解析材料 | 3–10 | 必须 | 优先解析记录集和 criteria；大 PDF 只解析相关页或关键段落，避免全文重复读取 |
-| 4. Agent 核验与推导 | 5–15 | 最高 | 优先核验候选集、排除理由、证据引用、去重、冲突；时间或请求紧张时先核验纳入集和边界冲突 |
-| 5. 最终文件与预览 | 2–6 | 中 | 确认文件存在、行数闭合；可编辑格式预览如果耗时过多，记录缺失原因即可 |
-| 6. 最终自检与回填 | 1–4 | 必须 | 必须先落盘 honest partial 再增量改进 |
+### 步骤 2：运行主命令生成基线
 
-**落盘策略**：步骤 2 后即保证 `/app/output/result.json` 合法存在。之后每次修改都写回磁盘。剩余时间低于 120 秒或已使用 ≥60 次请求时，立即停止增强，回填 `status`、`runtime`、`errors`/`limitations`，退出 0。不要进行无意义的反复读取或循环检查。
+```bash
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
+```
 
-## 5. 隐藏案例鲁棒性
+基线产物至少包括：
 
-| 情况 | 降级与诚实标注策略 |
-|---|---|
-| `case.json` 缺失、非法 JSON | 尝试其他 `case*.json`；仍无则 `status: "input_error"`，`errors` 写明，输出合法最小 `result.json`，退出 0 |
-| 没有题录记录 / 空输入 | `status: "insufficient_evidence"`，`candidates: []`，`uncertainty` 说明，不编造文献 |
-| 材料损坏或格式不支持 | 保留源文件路径，记录到 `degradations`；相关记录标 `pending_human`；继续处理其余记录 |
-| PDF/DOCX 解析失败 | 用其他可用工具重试一次；仍失败则记入 `errors`，该材料相关记录标 `pending_human` |
-| 摘要缺失 | 记录仍基于标题筛选；标签加 `NO_ABSTRACT`，confidence ≤0.35，证据引注只能来自标题 |
-| DOI 缺失 | 去重回退到归一化标题 + 模糊标题 + 第一作者 + 年份窗口；记录 `NO_DOI` |
-| 编码乱码 / mojibake | 按 `utf-8-sig → utf-8 → gb18030 → cp1252` 解码；cp1252 仅当替换字符减少时使用；无法修复则记录错误 |
-| 字段名不一致 / 嵌套记录 | 用 `references/io-schema.md` §1 的语义发现规则，不依赖键名；找不到则按无记录处理 |
-| criteria 缺失 | 所有记录 `SYS-NO-CRIT` → `pending_human`，`status: "partial"` |
-| 双标注者/双规则僵持 | 按 `references/criteria-codes.md` §4 优先级；仍不能判定则 `pending_human`，绝不平均化 |
-| 计数不闭合 | 记录错误，`status: "partial"`，保留计算出的数字，不强行改数 |
-| 输出目录不可写 | 尝试 `/app/output`；若不可写，使用 `/app/work/output_fallback`，并在 `errors` 说明；不能崩溃 |
-| 超时或请求耗尽 | 保证最后一次写回 `result.json`，其中 `status` 如实，退出 0 |
+- `result.json`
+- `candidates.csv`
+- `screening_labels.csv`
+- `arbitration.csv`
+- `query_log.json`
+- `dedup_log.json`
+- `audit.json`
+- `verification_report.json`
 
-任何情况下都要生成合法 `result.json` 并退出码 0。
+若脚本异常崩溃，不得清空 `/app/output`；改用已读取的真实材料手写最小合法结果，记录 `errors` 与 `degradations`，退出码 0。
 
-## 6. Rubric 维度 → 交付要求 → 自证方式对照表
+### 步骤 3：真实解析材料并核验
 
-| Rubric 维度 | 交付要求 | 如何自证 |
+1. PDF 使用真实 PDF 解析；DOCX 使用相应解析；CSV/TSV/JSON 直接解析；图片 OCR 需标注不确定性。
+2. 核对原始题录字段：`title`、`abstract`、`doi`、`authors`、`year`、`venue`、`source_db`、`query_id`、`retrieved_at`；注意字段别名。
+3. 核对基线输出引用的记录数、字段、quote 是否与原文一致。
+4. 检查编码问题、摘要缺失、DOI 缺失、格式不一致。
+5. 在 `/app/work/run_notes.md` 记录核验结果。
+
+### 步骤 4：Agent 核验与可选 draft 注入
+
+逐条核验 include/exclude/pending 记录：
+
+- 理由码是否命中当前标准版本条款；
+- quote 是否逐字来自标题或摘要；
+- locator 是否可定位；
+- 去重是否误并或漏并；
+- 冲突仲裁是否按固化优先级执行。
+
+发现错误时，通过 `/app/work/draft.json` 修正，再运行主命令更新产物。不得直接手改 CSV/JSON。修正记录写入 `result.json.changes`。
+
+若未使用 draft，基线即为最终结果；但必须真实核验并填写 `changes`、`uncertainty`、`pending_human`。
+
+### 步骤 5：最终自检与回填
+
+1. 再次确认 `result.json` 合法。
+2. 核对 CSV 行数与 `result.json` 计数闭合。
+3. 确认所有 `output_contract` 字段在 `result.json` 顶层与嵌套 `output_contract` 中双回显。
+4. 确认 `case_id`、`status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime` 均存在且真实。
+5. 可以独立运行 `scripts/verify.py`（若存在）复验证据；不要伪造其输出。
+
+---
+
+## 5. 证据、定位符与理由码
+
+### 来源编号
+init 阶段为每个实际读取的来源分配 `S1`、`S2`、`S3`…… 原文献、题录导出、任务说明、标准说明分别编号。
+
+### locator 格式
+- CSV/TSV：`file#row N`
+- JSON/JSONL：`file#item/array index/path`
+- PDF：`file#page P` 或 `file#paragraph N`
+- DOCX：`file#paragraph N`
+- 纯文本：`file#line N`
+
+每个关键数字、纳入/排除判断、去重合并依据、冲突结论都至少带一个 `[S#]` 和一个 locator。引用片段必须逐字一致。
+
+### 理由码
+使用 `references/criteria-codes.md` 中的字典。不得发明新码。常见结构：
+
+- `INC-{criterion_id}`：纳入
+- `EXC-{criterion_id}`：排除
+- `EXC-NO-ABSTRACT`、`EXC-LANGUAGE`、`EXC-POPULATION`、`EXC-STUDY-TYPE`
+- `PEND-*`：待人工确认
+- `SYS-NO-CRIT`：无可用纳入排除标准
+- `CONF-*`：冲突类型
+- `NO_DOI`、`NO_ABSTRACT`：元数据缺失标记
+
+若具体情境需要新码，应先写入 `references/criteria-codes.md` 对应条目并保持全部产物一致；运行中不得临时创造。
+
+---
+
+## 6. 输出契约与 artifacts 映射
+
+`result.json` 结构要求：
+
+```json
+{
+  "case_id": "required",
+  "status": "ok | partial | insufficient_evidence | input_error",
+  "output_contract": {
+    "...all original output_contract fields...": "..."
+  },
+  "...all original output_contract fields also at top level...": "...",
+  "sources": [],
+  "uncertainty": [],
+  "pending_human": [],
+  "errors": [],
+  "degradations": [],
+  "changes": [],
+  "runtime": {}
+}
+```
+
+### artifacts 映射表
+
+| 契约/环节 | 文件 | 要求 |
 |---|---|---|
-| 任务完成度（闭环） | 从 criteria → queries → dedup → screening → arbitration → candidates 各环节都有产出 | `result.json` 的 `criteria`、`queries`、`screening`、`dedup`、`arbitration`、`counts`、`candidates` 均非空且相互连接 |
-| 结果正确性 | 每条记录标签符合当前标准版本；理由码指向真实标题/摘要片段；去重不误并/漏并 | `screening[].matched_criteria` + `evidence[]` 逐字引用；`dedup[].basis`；`scripts/main.py --check` 逐字验证证据 |
-| 结果完整性 | 检索、去重、纳排、冲突、审计各环节都有产出，各环节条目数闭合 | `counts` 含 retrieved/unique/duplicates/screened/include/exclude/pending；`audit.closure` 为 true |
-| 结果可核验性 | 第三人能独立复跑同一批题录 | `queries[]` 有 db/raw/hits/retrieved_at；`dedup[].basis`；每条 `evidence_locator`；`audit.json`；`--check` 复算全部 |
-| 质量增益 | 相比未加载 Skill 提升纳排准确率与双人一致率，证据覆盖率提高 | `metrics.kappa_A_B`、`criteria_traceability`、`evidence_rate`；无金标准时 `metrics.note` 说明不声称准确率 |
-| 效率增益 | 减少人工逐条核对量、冲突解决时间、去重返工 | `metrics.human_review_load` = (pending + conflicts)/screened；`records_per_second` |
-| 新增能力 | 标准版本管理与回溯重判、理由码体系、分歧自动分类、审计链生成 | `criteria.version` + SHA-256 指纹；`references/criteria-codes.md`；`conflict_type`；`audit.json` |
-| 方法改进 | 去重、纳排、冲突仲裁、审计方法有实质改进 | 去重阈值和防误并记录；A/B 规则配置披露；固定仲裁优先级；计数闭合 |
-| 创新证据 | 证明方法边界与价值 | `method_disclosure` 说明双规则不是人类标注者；`limitations` 说明有限快照不可估全局召回 |
-| 可靠易用 | 正确触发、可按说明完成一次筛选 | `scripts/main.py` 一键运行；`--help`；`--check` 自检；本 SKILL 步骤清晰 |
-| 运行稳定性 | 同一输入重复运行输出同口径 | 确定性流程，无随机、无时钟决策；`verification_report.json` 可比较 |
-| 异常处理 | 对待 DOI 缺失、摘要为空、编码乱吗、格式不一致、标准冲突、双标注僵持等 | 第 5 节异常表；`errors`/`degradations`/`pending_human` 真实填充 |
-| 生态贡献 | 协议模板、标准表、理由码字典、配置、示例、边界维护信息齐全 | `references/` 下 protocol、code dictionary、schema、example；CSV 导出可复用 |
+| 主结果/最终答复 | `deliverable.md` 或契约命名的正文文件 | 每个数字/结论带 `[S#]` 与 locator |
+| 候选文献 | `candidates.csv` | 与纳入标签一致 |
+| 逐条筛选标签 | `screening_labels.csv` | 含理由码、quote、locator、confidence |
+| 冲突与仲裁 | `arbitration.csv` | 独立判断、冲突类型、仲裁结论、依据 |
+| 查询日志 | `query_log.json` | 查询式、库/字段/范围、检索日期、命中数 |
+| 去重日志 | `dedup_log.json` | 合并依据、canonical_id、相似度、风险 |
+| 审计链 | `audit.json` | 各环节输入/输出/操作人/时间、闭合等式 |
+| 自检报告 | `verification_report.json` | 键校验、证据校验、计数校验结果 |
+| 其他 contract 字段 | 按契约命名文件 | 每个字段都有磁盘产物和在 result.json 中回显 |
 
-## 7. 自检清单（提交前逐项检查）
+### 计数闭合
+审计必须满足：
 
-- [ ] 已真实读取 `/input/case.json` 与 `/input/task.md`；没有靠文件名猜测内容。
-- [ ] 已用适用工具解析所有材料；解析失败或限制已记录在 `errors` / `degradations`。
-- [ ] 已运行 `python3 scripts/main.py -i /input -o /app/output`，基线产物存在且未被删除。
-- [ ] `result.json` 包含原 `output_contract` 全部字段（键名不变）和 `case_id`。
-- [ ] `result.json` 包含 `status`（合法枚举值）、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`。
-- [ ] `candidates.csv`、`screening_labels.csv`、`arbitration.csv`、`query_log.json`、`dedup_log.json`、`audit.json` 全部存在。
-- [ ] 每条 include/exclude/unresolved 记录都有理由码、证据引用和定位符；证据引文逐字来自原文。
-- [ ] 去重合并与移除有 `dedup_log.json` 记录依据；未合并的模糊配对已在 `dedup_log` 中标记。
-- [ ] 冲突仲裁结论按 `references/criteria-codes.md` §4 优先级执行；僵持者进入 `pending_human`。
-- [ ] 审计等式成立：`retrieved = unique + duplicates`；`screened = include + exclude + pending`。
-- [ ] 候选文献与纳入标签一致；`candidates.csv` 行数等于 includes 数（或 plus unresolved 视字段定义）。
-- [ ] 已运行 `python3 scripts/main.py --check -i /input -o /app/output`；`verification_report.json` 存在；无严重失败或失败已记录。
-- [ ] 所有可编辑产物都有真实渲染预览；缺失预览已在 `degradations` 说明。
-- [ ] 没有编造科学数据、文献、引用、分数、白板；不确定项已标 `pending_human`。
-- [ ] 最终命令和流程可复现；退出码 0。
-- [ ] `GITHUB_URL.txt` 是否在提交根目录不属本 Skill 运行范围，但你若在 `/input` 看到它可忽略；不要把它当作文献来源。
+- `retrieved = unique + duplicates`
+- `screened = include + exclude + pending`
+- `candidates.csv` 行数与 includes 数一致，或按契约字段定义
+- 去重簇不丢原始记录；被合并项可追回
 
-## 8. 输出契约字段与制品
+若计数不闭合，`status` 必须为 `partial` 或 `input_error`，并在 `errors` 写明差异；不得强行改数。
 
-`result.json` 必须包含（除原 `output_contract` 字段外）：
+---
 
-- `case_id`
-- `status`：`ok` | `partial` | `insufficient_evidence` | `input_error`
-- `sources`：实际读取的材料路径与简要说明
-- `uncertainty`：未决边界、缺失元数据、低置信度等
-- `pending_human`：需要研究者确认的记录/事项
-- `errors`：解析错误、契约缺失、材料无法处理等
-- `degradations`：降级处理说明（如编码修复、OCR 不确定性、预览缺失）
-- `changes`：脚本输出后 Agent 核验/修改记录
-- `runtime`：执行时间、请求数、版本信息
+## 7. 隐藏案例鲁棒性
+
+### 最可能隐藏输入
+
+| 类型 | 重点 | 应对 |
+|---|---|---|
+| 正常案例 | 固定研究问题、9 篇真实署名论文、实际查询输入、全记录筛选 | 逐条筛全部记录，不抽样；每条有证据；给出完整审计 |
+| 边界案例 | 摘要缺失、DOI 缺失、重复导出、标题近似、冲突意见 | 摘要缺失仍可基于标题，标记 `NO_ABSTRACT` 且 confidence ≤ 0.35；DOI 缺失用归一化标题+模糊标题+第一作者+年份窗口；重复记录保留合并依据；冲突按固定优先级，不平均化 |
+| 异常案例 | 损坏 PDF、非法 JSON、空题录、编码乱码、输出目录不可写 | 见下表；必须保住合法 `result.json` 并退出 0 |
+
+### 异常与降级策略
+
+| 情况 | 处理 |
+|---|---|
+| `case.json` 缺失或非法 | 寻找其他 `case*.json`；仍无则 `status: "input_error"` |
+| 空题录 | `status: "insufficient_evidence"`，`candidates: []`，不编造 |
+| 材料损坏/格式不支持 | 记录到 `degradations`；相关记录 `pending_human`；继续处理其余 |
+| PDF/DOCX 解析失败 | 重试一次；仍失败记入 `errors`，相关记录 `pending_human` |
+| 摘要缺失 | 保留标题依据，标记 `NO_ABSTRACT`，低 confidence |
+| DOI 缺失 | 去重回退归一化标题 + 模糊标题 + 作者 + 年份窗口 |
+| 编码乱码 | 按 `utf-8-sig → utf-8 → gb18030 → cp1252` 解码；仍失败记入 `errors` |
+| 字段名不一致 | 使用 `references/io-schema.md` 的语义发现规则，不依赖固定键名 |
+| criteria 缺失 | 所有记录 `SYS-NO-CRIT` → `pending_human`，`status: "partial"` |
+| 双标注者/双规则僵持 | 按 `references/criteria-codes.md` 优先级；仍僵持则 `pending_human`，不平均化 |
+| 计数不闭合 | 保留真实数，记入 `errors`，`status: "partial"` |
+| 输出目录不可写 | 尝试 `/app/work/output_fallback`，记入 `errors`，不崩溃 |
+| 超时或请求耗尽 | 立即写回 `result.json`，状态如实，退出 0 |
+| search09 合成重复/冲突 fixture | 作为输入 fixture 识别，不当作预期答案，不据此声称真实人类评审 |
+
+任何情况下都必须生成合法 `result.json`，且退出码 0。
+
+---
+
+## 8. Rubric 维度 → 交付证据映射
+
+### 实际效果 40 分
+- **任务完成度 15**：`criteria → queries → dedup → screening → arbitration → candidates` 全链路非空且连接。`result.json` 中保留各环节字段。
+- **结果正确性 15**：每条标签有 `matched_criteria`、`reason_code`、逐字 `quote`、`locator`；去重有 `dedup_basis`、`certainty`、`risk`；冲突有 `conflict_type`、`arbitration_basis`。
+- **结果完整性 5**：`counts` 覆盖 retrieved/unique/duplicates/screened/include/exclude/pending；`audit.closure` 为 true。
+- **结果可核验性 5**：`query_log.json`、`dedup_log.json`、`audit.json`、`verification_report.json` 足以独立复跑。
+
+### 使用增益 25 分
+- 质量增益：计算并记录 `metrics.evidence_coverage`、`metrics.criteria_traceability`、`metrics.conflict_rate`。不声称未经对照的准确率。
+- 效率增益：记录 `metrics.human_review_load = (pending + conflicts)/screened`；记录去重合并依据数量、可自动追溯记录比例。
+- 增益可验证：全部产物使用稳定 schema、同口径 counts、逐字证据；避免随机和时钟决策；可复跑。不要生成 `golden_standard` 或自评分数。
+
+### 创新增益 15 分
+- 标准版本管理：`criteria.version` + SHA-256 指纹 + 版本变更记录。
+- 理由码体系：完整 code dictionary，覆盖边界、缺失、冲突。
+- 分歧自动分类：`conflict_type` 分类 + 仲裁优先级。
+- 审计链生成：`audit.json` 闭环，可追回每一步。
+- 方法披露：`method_disclosure` 说明“双规则是自动规则冲突，不等同人类评审”；说明有限快照不可估全局召回。
+
+### 可靠体验 10 分
+- 正确触发：主命令一键执行，失败也 exit 0。
+- 可复跑：确定性流程，无随机、无网络、无时钟决策。
+- 异常处理：第 7 节全部策略，真实写入 `errors`/`degradations`/`pending_human`。
+
+### 生态贡献 10 分
+- 文档：SKILL.md 完整；引用 `references/io-schema.md`、`references/criteria-codes.md`、`references/examples.md`。
+- 可复用：CSV/JSON 格式可直接用于综述；标准表、理由码字典、仲裁表可复用。
+- 推广：在 `result.json.method_disclosure` 与 `docs/README` 类内容中说明适用边界、限制和复用方式。
+
+---
+
+## 9. 基础 Agent 对照增益证据
+
+不生成“对比报告”或“提升分数”。增益证据应由实际产物结构承载：
+
+1. **同口径可比较**：固定 `result.json` schema、CSV 列、counts 等式。
+2. **证据率更高**：每条 include/exclude/pending 都有 quote+locator，而不是只给标签。
+3. **人工核对量更少**：`pending_human` 精确到 record_id 和原因；边界记录明确标记。
+4. **去重可复核**：每个合并簇有 `dedup_basis`、`canonical_id`、`risk`，避免误并和漏并。
+5. **审计链可独立重放**：`audit.json` 显示完整筛选路径。
+6. **确定性保证**：同一输入、同一命令产生同口径 counts 和标签。
+
+在 `result.json.runtime` 中只记录实际执行信息：版本、时间、请求数、材料数。禁止编造 benchmark 分数。
+
+---
+
+## 10. 预算与收尾策略
+
+| 阶段 | 建议请求 | 说明 |
+|---|---|---|
+| 输入盘点 | 1–3 | 读取文件列表、case.json、task.md |
+| 主命令基线 | 1 | 脚本运行不占模型请求 |
+| 真实材料解析 | 3–10 | 优先题录、criteria；大 PDF 只读相关页 |
+| Agent 核验 | 5–15 | 优先纳入集、边界记录、冲突、去重 |
+| 最终自检回填 | 1–4 | 确保 result.json 合法 |
+
+**强制收尾**：剩余时间 < 120 秒或已用 ≥ 60 次请求时，立即停止增强，写回 `status`、`runtime`、`errors`/`limitations`，确保 result.json 合法并退出 0。
+
+---
+
+## 11. 提交自检清单
+
+- [ ] `/app/output/result.json` 存在且合法。
+- [ ] 所有原 `output_contract` 字段在 `result.json` 顶层和嵌套 `output_contract` 中双回显。
+- [ ] `case_id`、`status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime` 均存在。
+- [ ] 候选文献、筛选标签、仲裁、查询日志、去重日志、审计日志全部存在。
+- [ ] 每条 include/exclude/pending 有理由码、逐字 quote、locator。
+- [ ] 计数闭合：`retrieved = unique + duplicates`；`screened = include + exclude + pending`。
+- [ ] 去重合并与未合并模糊配对都有记录。
+- [ ] 冲突按固定优先级仲裁，僵持进入 `pending_human`。
+- [ ] 未编造文献、数据、引用、分数、baseline 或 human review。
+- [ ] 退出码 0。
+
+---
+
+## 12. 与现有包内文件的对应关系
+
+- `scripts/main.py`：主命令 `run`，内部 init→build→selfcheck；可选 `init`/`check`。
+- `scripts/verify.py`：独立证据核验工具，诚实使用其输出。
+- `references/criteria-codes.md`：理由码字典、冲突类型、仲裁优先级。
+- `references/io-schema.md`：输入语义发现规则、draft.json 形状、result.json schema。
+- `references/examples.md`：最小示例，需标明为示例，不冒充正式结果。

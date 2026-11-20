@@ -1,254 +1,417 @@
 ---
 name: evidence-driven-writing
-description: 文献证据驱动写作。Agent 必须亲自读取并解析 /input 内实际材料，把写作任务拆成“论断清单 → 证据表 → 证据支撑成稿”三段可核对产物；脚本只是基线工具，最终交付物由 Harness Agent 本人读材料、推导、撰写/制作并复核。适用于学术段落写作、补引用、论断核验、证据强度评审与不确定性改写。
-version: 3.0.0
+description: 文献证据驱动写作。把写作任务拆成“论断清单 → 证据表 → 证据支撑成稿”三段可复核产物；每条实质论断必须落到具体材料段落、逐字原文与定位，并给出四因子证据强度和不确定性改写；冲突、缺口、缺失材料显式登记。Agent 路径与确定性兜底共享同一套产物与 result.json 契约。脚本只是本地抽取、校验与自检工具，最终事实判断必须回到真实输入材料。适用于学术段落写作、补引用、论断核验、证据强度评估、不确定性改写和引用一致性检查。
+version: 4.0.0
 license: MIT
 ---
 
-## ★ Agent 修改边界（最高优先级，先读）
+# 文献证据驱动写作
 
-本 Skill 的**结构化产物由脚本生成**；你（Agent）的职责是真实阅读材料、核验、补全文本型交付物，**不是重写结构化 JSON 的结构**。严格遵守：
+## 0. 最高优先级：单命令完整流程
 
-1. **禁止手改结构化产物**：`claims.json`、`evidence_table.json`、`result.json` 的结构字段（键名、claim_id、source_id、locator、quote、strength、support_scope、counts）**必须原样保留脚本输出**。不得用文本编辑覆盖这些文件。
-2. **允许 Agent 做的事**：
-   - 真实阅读 `/input` 材料，核验脚本抽取的 quote / locator / 数字是否与原文一致；
-   - 把核验结论写进 `agent_review.json`（新增文件：逐条列出 claim_id → 核验结果 verified/rejected/reason）以及 `pending_human.json` 的补充项；
-   - 亲自撰写/改写 **正文型交付物**（`deliverable.md` / `manuscript.md` 等），但每个数字、引用、论断必须能在 `evidence_table.json` 中找到依据；成稿不得删除契约要求的字段；
-   - 若发现脚本缺陷：写一个临时 python 调用脚本函数重算并覆盖（记录在 `agent_review.json` 的 `script_fixes`），**不得手工篡改 JSON**。
-3. **禁止生成无依据的评分/金标准**：不要自造 `golden_standard`、`diff_report`、加权自评分；核验只引用 `verify.py` 的真实输出 `verification.json`。若脚本已生成上述自设资产，**不要引用、不要美化**，在 `agent_review.json` 里说明其局限。
-4. **完整性自检**：结束前核对「output_contract 字段 × 磁盘文件 × result.json 键」三者一一对应；`deliverable.md` 与 `evidence_driven_draft.md` 如同时存在，两者内容必须不同（前者=干净成稿，后者=带证据标记草稿），不得复制粘贴同一文本。
-5. **预算**：先让脚本产出全套基线（通常 1–2 次调用即可），再把剩余请求用于逐条核验与成稿改进；接近 64 次/900 秒时立即收尾，保证 result.json 合法且 status 诚实。
+进入任务后，优先执行：
 
-# 文献证据驱动写作（writing-03）
+    python3 scripts/main.py run --input /input --output /app/output --work /app/work
 
-## 0. 最高优先级：完整性优先与“脚本只是工具”
+该命令内部完成：
 
-**脚本 `scripts/main.py`、`scripts/verify.py`、`scripts/gold.py` 只是工具，不是成品。最终交付物必须由你（Harness Agent）亲自阅读 `/input` 内实际材料，推导并撰写/制作完成。**
+1. `init`：盘点输入、确认 `case_id` 与 `output_contract`、解析材料、分配来源编号 `S#`、抽取候选论断、构建冲突分组。
+2. `build`：校验证据、执行确定性兜底抽取、渲染全部交付物、生成/更新 `result.json`。
+3. `selfcheck`：检查产物与契约字段、证据覆盖率、quote 命中、locator 有效性、`result.json` 合法性与诚实状态。
 
-本 Skill 采用“基线 + Agent 增强”混合策略：
+**即使发生异常也必须 exit 0**；异常写入 `result.json.errors` 与 `degradations`，已完成的合法 partial 必须保留。
 
-1. **先跑基线脚本**：进入任务后，先运行主脚本，产出全套基线交付物（所有 output_contract 字段、所有题面要求文件、合法 `result.json`）。
-2. **保留全部基线产物**：之后的任何校验、改写、补充只能在基线上增强；不得删除、清空或遗漏任何基线与契约字段；不确定时保留原产物并在 `result.json` 中标注。
-3. **Agent 亲自核验与改写**：在基线之上，你需要亲自读材料、抽查原句、核对数字/引用/术语/证据强度，并将核验结果写入 `result.json.agent_review`。
-4. **完整性自检**：提交前逐项核对「output_contract 字段列表 × 磁盘文件 × result.json 键」三者一一对应；partial 状态必须列出缺失项。
-5. **任何情况下都产出合法 `result.json` 并退出码 0**：材料缺失、解析失败、超时、契约缺失时，降级并诚实标注，绝不编造。
+若已写好 `${WORK}/draft.json`，`run` 命令必须优先采用 Agent 判断；若不存在或不可用，`run` 必须使用确定性兜底抽取生成实质工作稿，并在 `degradations` 中记录 `AUTO_EXTRACT`。
+
+兼容入口：
+
+    python3 -B scripts/main.py --input /input --output /app/output
+    python3 -B scripts/verify.py --input /input --output /app/output
+    python3 -B scripts/gold.py   --input /input --output /app/output
+
+`main.py` 是基线与最终产物生成入口；`verify.py` 生成独立复核；`gold.py` 仅用于本地自查证据，不替代平台评分。
 
 ---
 
-## 1. 用途与边界
+## 1. 本题评分内核：四类要求必须同时成立
 
-**做什么**：给定“一个需要文献支撑的写作任务 + 实际材料（PDF/DOCX/CSV/MD/JSON/TXT/图片等）”，产出可独立回查的三段交付物：
-
-- `claims.json`：论断清单，每条论断含 `claim_id, text, core, type, location`。
-- `evidence_table.json`：证据表，每条证据含 `claim_id, source_id, locator, quote, source_type, strength, support_scope, conflicts, rationale, verified`。
-- `evidence_driven_draft.md`：按证据强度调整语气后的成稿，含引用编号、冲突句、证据边界段与参考文献。
-- 所有结果写入 `result.json`，并回填原 `output_contract` 的全部字段。
-
-**四个必须成立的性质**（本题评分内核）：
-
-| 要求 | 本 Skill 的落实 |
+| 要求 | 本 Skill 的硬性落法 |
 |---|---|
-| 找得到 | 论断按句切分，每条落到 `locator`（文件 + `[B块.S句]` + 字符偏移），不停留在“有引用”。 |
-| 对得上 | `quote` 必须逐字复制自实际材料；元数据只转录、不补造 DOI/年份/期刊。 |
-| 说得准 | 四因子强度分级 + 限定语映射；无干预设计时因果措辞自动下调为关联；冲突证据进 `conflicts` 与成稿 however 句。 |
-| 复得现 | 三件产物通过 `claim_id` 双向可 join；`verify.py` 独立重读材料复算；`gold.py` 产出金标准、差分、版本记录、日志与自检。 |
+| 找得到 | 每个实质性论断拆成 `claim_id`，关联到 `source_id`，并给 `locator`：相对文件路径 + 块/段位置 + 句位置 + 可选页/段号 + chars 偏移。禁止只写“有引用”。 |
+| 对得上 | `quote` 必须从解析后的真实材料逐字复制；元数据只转录，不补造 DOI、作者、年份、期刊；不确定项写入 `pending_human`。 |
+| 说得准 | 证据强度用四因子：研究设计、样本量/重复验证、共识程度、直接性；正文语气必须与该强度相称。相关性不写成因果；冲突证据必须出现在 `conflicts` 与成稿中。 |
+| 复得现 | 论断清单、证据表、成稿之间用 `claim_id` / `source_id` 可 join；`verify.py` 独立重读材料复算；计数写入 `metrics`。 |
 
-**不做什么**（硬边界）：不联网、不从记忆补文献、不补造数值/DOI/结论、不把“未找到证据”写成“证明不存在”、不把相关性写成因果。材料没有的对象进 `pending_human`，不构造。
-
----
-
-## 2. 运行契约
-
-### 2.1 输入
-
-- `/input/case.json`：任务主输入，含 `case_id`、`task_instruction`、`output_contract`、`source` 等。
-- `/input/task.md`：题面任务说明与评分维度。
-- `/input/**`：题面规定的实际材料，可能是 PDF、DOCX、CSV、MD、JSON、TXT、图片等。
-
-### 2.2 输出
-
-- 工作目录：`/app/work`
-- 最终产物目录：`/app/output`
-- 必须存在合法 `result.json`，包含原 `output_contract` 全部字段（键名不改、未知字段保留、缺值 `null`/`[]`）与 `case_id`。
-- 状态字段：`status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`。
-- `status` 取值：`ok` | `partial` | `insufficient_evidence` | `input_error`，必须与缺口一一对应，不美化。
-
-### 2.3 脚本调用
-
-```bash
-python3 -B scripts/main.py   --input /input --output /app/output     # 主流程：生成基线全套产物
-python3 -B scripts/verify.py --input /input --output /app/output     # 独立复核 -> verification.json
-python3 -B scripts/gold.py   --input /input --output /app/output     # 资产层：金标准/差分/版本/日志/自检
-```
-
-三步都应要求退出码 0；`main.py` 会先写 partial `result.json`，异常时 finalize。  
-**注意**：这些脚本是离线工具，只允许 Python 标准库，不依赖 CWD，不联网。
-
-### 2.4 资源限制
-
-- 本次 Skill 包最多 50 个 UTF-8 文本文件、单文件 ≤500KB、总 ≤2MB、无 symlink。
-- 运行预算：**64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理）**。必须预算感知，尽早落盘 honest partial。
+**硬边界**：不联网、不从记忆补文献、不补造数值/DOI/结论、不把相关写成因果、不把模型记忆写成来源、不把脚本相似度当作证据、不伪造渲染文件或预览。材料没有的内容进入 `pending_human` 或 `gaps`，不得构造。
 
 ---
 
-## 3. 输出文件清单
+## 2. 触发与适用边界
 
-| 文件 | 内容 |
-|---|---|
-| `evidence_driven_draft.md` | 主产物：可编辑成稿（引用编号 + 限定语 + 证据边界段 + 参考文献） |
-| `deliverable.md` | 主产物兼容命名 |
-| `claims.json` | 论断清单 |
-| `evidence_table.json` | 证据表 |
-| `evidence_strength.md` | 逐条强度依据（四因子分值 + 理由） |
-| `reference_check.md` | 著录完整度与核验路径（明确“未联网核验”） |
-| `uncertainty_notes.md` | 低强度/冲突/仅摘要/未匹配计数 |
-| `pending_human.json` | 材料缺口与需人工确认项 |
-| `verification.json` | `verify.py` 独立复核结果 |
-| `result.json` | 契约回填 + 计数 + 资产层字段 + Agent 复核字段 |
-| `golden_standard.json` | 金标准 16 项（独立重算） |
-| `diff_report.md` | 逐项对照与偏差修法 |
-| `version_history.md` | 运行时版本记录 |
-| `run.log` | 时间戳日志 |
-| `self_check.json` | 自检（契约字段、证据覆盖率、兜底闸门实际退出码等） |
+触发：用户要求“为这段文字补引用 / 核对论断 / 评估证据强度 / 改写过度推断段落 / 按证据强度重写讨论段 / 做文献证据表”；或输入目录含 `case.json`、`task.md` 与材料。
+
+适用：学术段落、综述、讨论段、摘要、结论的文献证据核对与改写；尤其适合需要把“看似有引用”升级为“论断—证据—原文定位”的写作任务。
+
+不适用：凭空生成研究问题、伪造文献、无需来源的创意写作、以及只能依赖模型记忆的外部知识问答。
 
 ---
 
-## 4. 专属执行流程（编号步骤）
+## 3. 输入输出契约
 
-> 每个步骤都要写：输入 → 动作 → 输出 → 失败分支。你（Agent）必须实际执行，不得只读脚本输出。
+输入：
 
-### 步骤 1：盘点输入与契约
+- `/input/case.json`：含 `case_id`、`task_instruction`、`output_contract`、`source` 等。
+- `/input/task.md`：任务说明、体裁、受众、格式、边界。
+- `/input/**`：PDF、DOCX、CSV、MD、JSON、TXT、图片等真实材料。PDF 应读取实际 PDF，不得依赖预先抽取好的答案层。
 
-- **输入**：`/input/case.json`、`/input/task.md`、`/input/**` 材料清单。
-- **动作**：
-  1. 读取 `case.json`，提取 `case_id`、`task_instruction`、`output_contract` 的全部字段名。
-  2. 读取 `task.md`，确认任务体裁、受众、格式约束、评分侧重点。
-  3. 列出 `/input` 下所有真实文件，识别材料类型（PDF/DOCX/CSV/MD/JSON/TXT/图片）。
-  4. 在工作目录 `/app/work` 记录契约字段清单与材料清单（可写在内存/临时 notes，不必额外成稿）。
-- **输出**：清晰的“契约字段清单 + 材料清单”。
-- **失败分支**：
-  - `case.json` 缺失或损坏：`status=input_error`，`output_contract` 缺失则使用题面默认最小字段集（`case_id`, `deliverable`, `preserved_facts`, `evidence_map`, `change_log`），继续后续步骤，不得退出。
-  - 材料清单为空：`status=partial`，`pending_human` 标注“无材料可解析”。
+输出：
 
-### 步骤 2：运行基线脚本（必须）
+- `/app/output`：最终结果与全部产物。
+- `/app/work`：中间台账、草稿、解析文本、临时计数。
 
-- **输入**：`/input`、`/app/output` 路径。
-- **动作**：运行 `python3 -B scripts/main.py --input /input --output /app/output`。
-- **输出**：全套基线产物（见第 3 节文件清单中脚本可生成的部分），以及初始 `result.json`。
-- **失败分支**：
-  - 脚本超时或退出码非 0：立即降级，手动创建最小合法 `result.json`，`status=partial`，`errors` 记录 `stage=baseline`；但不得跳过后续步骤。
-  - 某个产物缺失：记录到 `pending_human` / `errors`，后续用 Agent 亲自产出的内容补齐。
+`result.json` 必须满足双回显：
 
-### 步骤 3：用工具真实解析材料
+- 契约字段在顶层各出现一次。
+- 同时完整嵌套在 `output_contract` 中。
+- `case_id` 在顶层与 `output_contract.case_id` 各出现一次。
 
-- **输入**：`/input/**` 实际材料文件。
-- **动作**：
-  1. 对每个材料文件用可用工具实际解析文本：
-     - PDF：优先使用平台提供的 `pdf-text-tool` 或等价文本抽取工具；若为扫描件且无 OCR，记 `read_method=none`。
-     - DOCX/CSV/MD/JSON/TXT：用 Python 标准库或对应轻量工具读取。
-     - 图片：如平台提供 OCR 工具则使用；否则 `pending_human` 提示需要 OCR。
-  2. 不得依据文件名、领域标签猜测内容；必须真实读入。
-  3. 将材料的章节/段落/句子位置信息保存为可回查的 `locator`（文件相对路径 + `[B块.S句]` + 字符偏移）。
-- **输出**：可核验的材料结构化块/句子与定位信息。
-- **失败分支**：
-  - 文件损坏/格式不支持：`degradations` 记录 `unsupported`，`pending_human` 提示转格式或人审。
-  - 只有摘要/无全文：标注 `abstract_only`，相关证据强度最高记“中”，进 `pending_human`。
-  - 原文与摘要矛盾：两条都录入证据表，冲突进 `conflicts`。
+顶层至少包含：
 
-### 步骤 4：构建/核对证据与论断
+    case_id
+    status
+    sources
+    uncertainty
+    pending_human
+    errors
+    degradations
+    changes
+    runtime
+    output_contract
 
-- **输入**：步骤 3 解析出的材料文本、步骤 2 基线 `claims.json` 与 `evidence_table.json`。
-- **动作**：
-  1. 亲自逐条核对基线论断是否真的来自材料；用 `quote in material` 的真实文本匹配而非模糊猜测。
-  2. 对每条论断，确认数字、术语、引用、图表、关键结论的来源定位与逐字摘录。
-  3. 缺失来源或来源不支持时，改写为待核表述并加入 `pending_human`；不得硬凑引用。
-  4. 冲突证据要保留并进入 `conflicts`，不静默丢弃。
-  5. 证据强度按四因子（研究设计/样本量/独立来源/冲突）复算，写 `rationale`。
-- **输出**：经 Agent 核验/修正后的 `claims.json`、`evidence_table.json`、`evidence_strength.md`、`uncertainty_notes.md`。
-- **失败分支**：
-  - 材料整体不足：`status=insufficient_evidence`，三件交付物仍尽量产出，每条缺口进 `pending_human`。
-  - 个别论断找不到来源：保留该论断但标 `unsupported` + `pending_human`，不删除观点也不编造证据。
+其余 `output_contract` 中出现的键，也必须在顶层同名回显。未知字段原样保留，不删除、不重命名、不假设语义。
 
-### 步骤 5：Agent 产出完整成品
+`status` 只能取：
 
-- **输入**：核验后的证据表、原写作任务约束。
-- **动作**：
-  1. 基于证据亲自撰写/改写 `evidence_driven_draft.md` 与 `deliverable.md`。
-  2. 保持事实、数字、引用、术语一致；只做有依据的修改；改写时记录 `change_log`（`original_quote` → `revised_quote` + 理由 + `locator`）。
-  3. 低强度/未证实表述使用适当限定语；冲突证据另起 however 句；末尾写“证据边界”与参考文献表。
-  4. 如任务要求 Office/幻灯片/图形等可编辑产物，必须额外生成真实渲染的 PDF/PNG 预览；本包默认主产物为 Markdown，可编辑且无需额外预览。
-- **输出**：完整成稿与修改记录。
-- **失败分支**：
-  - 因预算不足无法完成全文时，至少保留脚本基线成稿，并在 `result.json` 标注 `reviewed_by_agent`、列出未完成项。
-  - 任何改写不得删除脚本产出的原基线；原样保留并新增版本说明。
+- `ok`
+- `partial`
+- `insufficient_evidence`
+- `input_error`
 
-### 步骤 6：自检 rubric 与运行验证
-
-- **输入**：`/app/output` 已落盘产物。
-- **动作**：
-  1. 运行 `python3 -B scripts/verify.py --input /input --output /app/output`，复核逐字引文、claim-join、字段完整性、引用可解析性。
-  2. 运行 `python3 -B scripts/gold.py --input /input --output /app/output`，产出金标准、差分报告、版本记录、日志与自检；该步失败只降级，不影响主产物。
-  3. 亲自对照第 7 节 rubric 对照表与第 8 节自检清单，逐项核对。
-- **输出**：`verification.json`、`golden_standard.json`、`diff_report.md`、`self_check.json`。
-- **失败分支**：
-  - 验证脚本失败：记录到 `errors`，不得隐藏；尽量修复后重跑一次，仍失败则诚实保留 partial。
-  - 自检未通过：修复可修复项；不可修复项写入 `pending_human`。
-
-### 步骤 7：回填并 finalize `result.json`
-
-- **输入**：所有产物与自检结果。
-- **动作**：
-  1. 读取原始 `output_contract`，把每个字段原样写入 `result.json` 顶层，键名不改、未知字段保留、缺值 `null`/`[]`。
-  2. 加入 `case_id`、`status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`。
-  3. 加入基线计数字段（`claims_total`、`evidence_rows`、`quotes_verified` 等）与资产层字段（`golden_standard`、`diff_report`、`version_history`、`self_check`，值为 `{path, count, note}`）。
-  4. 加入 `agent_review`：列出你实际阅读的材料文件名、亲自抽核的索赔数、确认/修正/待人工项、以及未完成边界。
-  5. 确认 `result.json` 合法；若 partial，必须列出缺失项。
-- **输出**：最终合法 `result.json`。
-- **失败分支**：
-  - 无法写入 `/app/output`：回退到 `/app/work` 写一份，再尝试复制；仍失败则至少保证退出码 0 并在 `errors` 记录。
+必须与缺口、失败和人工确认项一一对应，不美化。
 
 ---
 
-## 5. 预算策略（64 次模型请求 / 900 秒）
+## 4. 交付物完整清单
 
-**必须在预算内优先完成 rubric 权重最高的交付物：三件核心产物（亲笔成稿、证据表、论断清单）与合法 `result.json`。**
+每个案例至少应形成“三段式”可复核产物：
 
-建议请求分配如下：
+1. **论断清单**：`claims.json`
+   - `claim_id`、`statement`、`type`、`source_ids`、`quote`、`locator`、`strength`、`support_scope`、`uncertainty`、`action`。
+   - 论断必须来自任务稿或材料可明确支持的句子；每条论断控制在可判定范围内。
 
-| 阶段 | 动作 | 估计请求数 |
-|---|---|---|
-| 必做 | 读 `case.json` + `task.md`，梳理契约 | 1-2 |
-| 必做 | 运行 `main.py` 基线 | 0-1（工具调用，不消耗模型请求） |
-| 必做 | 解析关键材料（只看与任务直接相关的章节/页码） | 3-8 |
-| 必做 | 核验重点论断/数字/引用，修正证据表 | 2-5 |
-| 必做 | 撰写/改写主成稿 | 2-5 |
-| 必做 | 运行 `verify.py` 与 `gold.py` | 0-2（工具调用） |
-| 必做 | 回填 `result.json` | 1-2 |
-| 可跳过 | 重复阅读同一份大 PDF、无关附录、逐页细读 | 跳过 |
-| 可跳过 | 多次运行 `gold.py`、格式装饰、无依据重写 | 跳过 |
+2. **证据表**：`evidence_table.json`
+   - `source_id`、`file`、`locator`、`quote`、`support_scope`、`strength`、`supports_claims`、`conflicts_claims`、`notes`。
+   - 一行证据可支撑多条论断；一条论断可引用多行证据。
 
-总计通常 10-24 次模型请求，留足余量。  
-**关键原则**：
+3. **证据支撑成稿**：`deliverable.md` 或题面指定的可编辑交付物
+   - 每句实质性论断标注 `[C#][S#]`。
+   - 关键数字、术语、结论后的方括号内给出对应 `evidence_table.json` 中的来源与定位。
+   - 语气与证据强度相称；冲突和缺口显式写出，不隐藏。
 
-- 先落盘：步骤 2 之后立即有 partial `result.json`；步骤 5 写完主成稿后再次落盘。
-- 接近 900 秒或 64 次请求时：立即 finalize 当前已写出的产物，标注 `degradations=["time_budget_reached"]` 或 `["request_budget_reached"]`，确保退出码 0。
-- 单次响应 ≤16384 tokens：不要一次性读入超大 PDF；分段读取，每段只摘录需要的 block/sentence。
+同时生成：
+
+- `preserved_facts.json` / `preserved_facts.md`：记录不可凭空改变的数字、条件、术语、来源。
+- `change_log.json` / `change_log.md`：修改动作、原因、人工确认项、未解决问题。
+- `evidence_driven_draft.md`：带 `[C#][S#]` 标记的核验草稿；若与 `deliverable.md` 同时存在，两者不能相同。
+- `agent_review.json`：Agent 或规则核验记录，逐条列出核验结果与理由。
+- `verification.json`：`verify.py` 真实输出，不手改。
+- `self_check.json`：产物与契约自检结果。
+- `run.log`：时间戳日志。
+- 若任务要求 Office / 幻灯片 / 图形产物，例如 `.docx`、`.pptx`、`.xlsx`，必须额外生成真实 PDF/PNG 预览；若无法渲染，在 `result.json` 标注 `preview_unavailable`，写入 `limitations`。
 
 ---
 
-## 6. 隐藏案例鲁棒性与降级
+## 5. Agent-first 双路径
 
-| 情况 | 处置 | result.json 状态 |
-|---|---|---|
-| 材料缺失 / 无输入文件 | 产出最小产物，`pending_human` 标“无材料”；不编造 | `partial` / `input_error` |
-| 材料损坏 / 格式不支持（xlsx/pptx/doc 等） | `degradations` 记 `unsupported`；`pending_human` 提示转格式 | `partial` |
-| PDF 无文本层（扫描件） | `read_method=none`；`pending_human` 提示 OCR | `partial` |
-| 仅有摘要 / 文献不可得 | 标 `abstract_only`；强度最高“中”；进 `pending_human` | `insufficient_evidence` |
-| 原文与摘要矛盾 | 两条进证据表，`conflicts` 记录，成稿保留冲突 | `ok`/`partial` |
-| 证据相互冲突 | `conflicts[]` + however 句 + 强度下调 | `ok`/`partial` |
-| 契约缺失 / `output_contract` 不存在 | 用最小默认契约字段（`case_id`, `deliverable`, `preserved_facts`, `evidence_map`, `change_log`），`errors` 记录 | `partial` |
-| 运行超时 / 请求接近上限 | 立即 finalize 已产出 partial；`degradations` 记录原因 | `partial` |
-| 脚本退出码非 0 | 手动实现关键结果，`errors` 记录 `stage=baseline/tool`，继续跑完全流程 | `partial`/`input_error` |
-| 空输入 / 坏 JSON | 写合法 partial `result.json`，`status=input_error`；资产层照常落盘（金标准全部不可判定） | `input_error` |
-| 目录不可写 | 回退 `/app/work` 输出，`errors` 记录 | `partial` |
-| 资产层异常（写盘失败/子进程超时） |
+### 5.1 Agent 路径
+
+优先按下列顺序：
+
+1. 阅读 `/input/case.json`、`/input/task.md`、全部材料。
+2. 基于 `init` 台账和真实材料判断，写 `/app/work/draft.json`。
+3. 执行：
+
+       python3 scripts/main.py run --input /input --output /app/output --work /app/work
+
+`run` 检测到有效 `draft.json` 后，必须采用其中 Agent 判断进行 `build`，不得用规则覆盖 Agent 已确认的证据匹配。
+
+`draft.json` 最小形状：
+
+    {
+      "case_id": "...",
+      "claims": [
+        {
+          "claim_id": "C01",
+          "statement": "...",
+          "source_ids": ["S1"],
+          "locator": "materials/xxx.pdf [B2.S3] chars:120-150",
+          "quote": "逐字原文",
+          "strength": {
+            "design": "RCT|cohort|case_series|review|expert_opinion|unclear",
+            "sample_size_or_replication": "...",
+            "consensus": "...",
+            "directness": "...",
+            "level": "high|moderate|low|very_low|unknown",
+            "hedge": "..."
+          },
+          "support_scope": "supports|partial|insufficient|conflict",
+          "uncertainty": "...",
+          "action": "keep|add|revise|flag"
+        }
+      ],
+      "conflicts": [
+        {
+          "conflict_id": "X01",
+          "description": "...",
+          "source_ids": ["S2", "S3"],
+          "resolution_or_status": "unresolved|resolved_as|needs_human"
+        }
+      ],
+      "pending_human": [
+        {
+          "item": "...",
+          "reason": "..."
+        }
+      ],
+      "changes": [
+        {
+          "target": "...",
+          "action": "...",
+          "reason": "..."
+        }
+      ]
+    }
+
+### 5.2 无 draft 时的确定性兜底
+
+如果 `${WORK}/draft.json` 不存在、非法或为空：
+
+- `build` 必须用 `init` 台账确定性抽取生成实质工作稿。
+- 逐字 `quote` 必须来自解析文本；`locator` 必须来自解析块句。
+- 所有兜底结论必须标记 `AUTO_EXTRACT`，写入 `result.json.degradations` 和 `gaps`。
+- 兜底路径也必须产出与 Agent 路径相同的完整产品与同一份 `result.json` 契约。
+- 不得因无 Agent 判断而输出空壳模板；宁可为 low/unknown 强度，也要给出可核验的证据表。
+
+### 5.3 增量改进
+
+若先跑了确定性兜底，之后 Agent 读材料后写出 `draft.json`，重新执行同一 `run` 命令即可改进。再次执行时必须：
+
+- 保留已有有效产物。
+- 仅覆盖被 Agent 核验改变的字段。
+- 更新 `change_log` 与 `agent_review.json`。
+- 重新运行 `selfcheck` 并最终 `result.json` 合法落盘。
+
+---
+
+## 6. 确定性抽取与核验规则
+
+### 6.1 来源编号与定位
+
+- 每个可用来源分配 `S1, S2, ...`。
+- 文件内定位统一为：
+
+      <相对路径> [B<块号>.<句号>] chars:<start>-<end>
+
+- 若有页码或段落号，也写入 `locator` 附注，例如 `page:3 para:2`。
+- 禁止仅凭文件名或领域标签猜测内容；一切事实以解析出的文本和题面说明为准。
+
+### 6.2 quote 核验
+
+- `quote` 必须逐字来自材料。
+- 允许去除换行/连字符产生的排版噪声，但不得改写词句、不得省略关键限定词。
+- `verify.py` 必须执行“规范化后 quote 是否在材料文本中命中”的检查；未命中项标记 `quote_unverified`，不得静默当作 verified。
+- 若原文与摘要矛盾，记录冲突，成稿中显式提示摘要不可作为唯一依据。
+
+### 6.3 证据强度
+
+四因子：
+
+1. `design`：RCT、meta-analysis、systematic review、cohort、case-control、case series、cross-sectional、in vitro、animal、expert opinion。
+2. `sample_size_or_replication`：样本量、置信区间、重复验证情况。
+3. `consensus`：单篇、多篇一致、指南推荐、争议。
+4. `directness`：是否直接支撑该论断，是否为代理终点，人群是否一致。
+
+强度分级与语气映射：
+
+- `high`：可直接陈述，如“证据支持……”“试验显示……”。
+- `moderate`：用“提示”“与……相关”“支持该可能性”。
+- `low`：用“初步证据”“可能”“有限数据提示”。
+- `very_low` / `unknown`：用“尚不能确定”“证据不足”“需要进一步研究”。
+
+因果表达限制：
+
+- 没有干预设计或明确时间—剂量—效应时，不得写因果动词。
+- 相关、关联、观察性差异只能在观察设计下表达。
+- 单篇小样本不得写“领域共识”。
+
+### 6.4 冲突与不确定性
+
+- 冲突证据必须进入 `conflicts`。
+- 成稿中不得只保留对结论有利的证据；至少以一个 however / but / “另有证据显示”句显式披露冲突。
+- 对“材料未说明”“证据不一致”“仅有摘要”“无全文”等必须进入 `pending_human` 或 `gaps`。
+- 材料不足不得推断为“不存在”。
+
+---
+
+## 7. result.json 双回显模板
+
+`result.json` 的合法最小形态示例：
+
+    {
+      "case_id": "CASE-EXAMPLE",
+      "status": "partial",
+      "deliverable": "output/deliverable.md",
+      "preserved_facts": "output/preserved_facts.json",
+      "evidence_map": "output/evidence_table.json",
+      "change_log": "output/change_log.md",
+      "sources": [
+        {
+          "source_id": "S1",
+          "file": "input/material/article.pdf",
+          "type": "pdf",
+          "locator": "materials/article.pdf",
+          "usable": true
+        }
+      ],
+      "uncertainty": {
+        "unresolved_conflicts": 1,
+        "abstract_only_sources": [],
+        "quote_unverified": [],
+        "needs_human": [
+          "是否存在撤稿版本需人工确认"
+        ]
+      },
+      "pending_human": [],
+      "errors": [],
+      "degradations": [
+        "AUTO_EXTRACT: no draft.json present"
+      ],
+      "changes": [
+        {
+          "target": "deliverable.md",
+          "action": "added locator to all substantive claims",
+          "reason": "traceability"
+        }
+      ],
+      "runtime": {
+        "command": "python3 scripts/main.py run --input /input --output /app/output --work /app/work",
+        "exit_code": 0
+      },
+      "output_contract": {
+        "case_id": "CASE-EXAMPLE",
+        "deliverable": "output/deliverable.md",
+        "preserved_facts": "output/preserved_facts.json",
+        "evidence_map": "output/evidence_table.json",
+        "change_log": "output/change_log.md"
+      }
+    }
+
+以上为示例，实际字段以 `/input/case.json` 中的 `output_contract` 为准。未知字段不能丢弃。
+
+---
+
+## 8. 自检与复核
+
+### 8.1 必须先跑自检
+
+单命令 `run` 内的 `selfcheck` 必须至少检查：
+
+- `output_contract` 每个字段是否有对应文件或 JSON 值。
+- `claims.json` 与 `evidence_table.json` 是否可 join。
+- 每个关键数字、术语、引用是否有 `[S#]` 与 locator。
+- 每个 `quote` 是否来自材料。
+- `result.json` 是否合法 JSON，并且 `case_id` 顶层与嵌套一致。
+- 兜底路径是否记录 `AUTO_EXTRACT`。
+- 不可判定的办公/图形预览是否诚实标记。
+
+### 8.2 独立复核
+
+完成主流程后，可继续执行：
+
+    python3 -B scripts/verify.py --input /input --output /app/output
+    python3 -B scripts/gold.py   --input /input --output /app/output
+
+必须三者退出码 0。`verification.json` 与 `self_check.json` 是真实自检证据，不手改。
+
+---
+
+## 9. 可靠性、异常与隐藏案例鲁棒性
+
+### 9.1 正常案例
+
+- 给定草稿、文献材料、任务格式。
+- 应产出完整三段式交付物，不做多余改写。
+- 所有改写句都降低泛化级别，并补上可追溯来源。
+
+### 9.2 边界案例
+
+- 只有摘要、缺全文。
+- 原文与摘要矛盾。
+- 材料有多种文件格式或混合语言。
+- 材料有参考文献表但正文无定位信息。
+- 遇到这些情况：标记 `abstract_only` / `conflict` / `mixed_language`，强度最高不得高于 `moderate`，locator 注明可得范围。
+
+### 9.3 异常案例
+
+- PDF 扫描件无文本层。
+- DOCX/PDF 损坏、编码错误。
+- 空输入、缺 `case.json`。
+- 权限不足或路径错误。
+
+处理原则：
+
+- 单文件失败不中断整体。
+- 可读材料继续处理。
+- 空输入或完全不可读时，写出 `status=input_error` 或 `partial` 的合法 result.json，并 exit 0。
+- 需要 OCR 的扫描件进入 `pending_human`，不得伪造文本层。
+
+---
+
+## 10. 预算感知
+
+官方预算：64 次模型请求，900 秒，单次响应 16384 tokens 含推理。
+
+执行策略：
+
+1. 优先落盘基线，确保 `result.json` 和核心产物存在。
+2. 用最少请求完成完整契约。
+3. 剩余预算用于逐条 Agent 核验与成稿改进。
+4. 接近限制时立即 finalize，不追求完美，不丢已完成的 partial。
+5. 每次运行都应在 `runtime` 中记录时间、命令、状态。
+
+---
+
+## 11. 禁止事项
+
+- 禁止手改 `claims.json`、`evidence_table.json`、`result.json` 的结构字段。
+- 禁止生成无依据的 `golden_standard` 或自制评分并以平台分数自居。
+- 禁止用脚本模板/骨架直接当最终成稿。
+- 禁止隐藏冲突证据或缺口。
+- 禁止把 memorized reference 写入来源。
+- 禁止用不可复现的方法生成 PDF/PNG 预览。
+- 禁止依赖网络、固定 CWD、未声明的个人文件。
+- 禁止把“无证据”写成“证明不存在”。
+
+---
+
+## 12. 文档与资源
+
+本 Skill 的精确 schema、强度分级和字段口径见：
+
+- `references/evidence_schema.md`
+- `references/method_and_runbook.md`
+- `references/lexicon_zh_en.txt`
+
+执行时先读 `references/evidence_schema.md` 确认字段；执行边界与失败处理以 `references/method_and_runbook.md` 为准；中英文不确定性表达可查阅 `references/lexicon_zh_en.txt`。
+
+若包内存在 `SELFTEST.md`、`environment/resources.yaml`、`references/guide.md`，应作为自检与资源声明证据；若不存在，则以 `/app/output/self_check.json` 和 `/app/output/verification.json` 作为实际自检证据，不得在 `result.json` 中声称未生成的文件存在。

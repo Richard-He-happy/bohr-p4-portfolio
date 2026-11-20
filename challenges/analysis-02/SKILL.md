@@ -1,72 +1,180 @@
 ---
 name: statistical-analysis-interpretation
-description: 真实科研数据表统计 Skill：解析原始材料（CSV/TSV/TXT/SQLite/PDF/DOCX 等），完成清洗、描述统计、假设检验、效应量、置信区间与可核验报告；先生成基线全套交付物，再由 Harness Agent 亲自核对材料与数字并补强。适用于统计分析与结果解读 Benchmark。
-version: 2.0.0
+description: 科研数据统计分析 Skill：解析 CSV/TSV/TXT/SQLite/PDF/DOCX 等原始材料，完成清洗、描述统计、推断统计、效应量、置信区间、图表与可核验报告；支持 Agent 先核验写 draft.json，或脚本确定性兜底生成同一套 result.json 契约。适用于统计分析与结果解读 Benchmark。
+version: 3.0.0
 ---
 
-# 统计分析与结果解读（analysis-02）
+# 统计分析与结果解读 Skill
 
-**用途**：读真实科研数据材料，清洗到可统计状态，按研究设计与假设检验结果选择检验方法，给出效应量与置信区间，并把结论翻译成科研人员可判断的表述。  
-**铁律**：脚本（`scripts/main.py`、`scripts/statsx.py`）只是工具，负责生成基线数字与全套中间表。最终交付物必须由你（Harness Agent）亲自读取 `/input` 原始材料、核对证据、推导结论、撰写/制作。禁止把脚本骨架、模板输出或任何未经过真实验证的中间产物直接当作最终成品。
+## 0. P0 修改边界与铁律
 
-## 1. 运行时契约与目录约定
+本 Skill 最终结构化产物由 `scripts/main.py` 与 `scripts/statsx.py` 生成；Agent 的职责是真实读取原始材料、核验证据、补强判断与撰写成稿，不是手工重写最终 JSON。
+
+必须遵守：
+
+1. Agent 不得手工编辑 `result.json`、`evidence_table.json`、`cleaning_rules.json`、`sources.json` 等脚本产出的结构化文件。
+2. Agent 可以：
+   - 真实读取 `/input` 原始文件与数据字典；
+   - 写 `${WORK}/draft.json`，把判断、清洗规则、检验选择、效应量口径和 claims 写入该工作稿；
+   - 写 `${WORK}/agent_review.json`，记录逐条核验结论；
+   - 改写 `analysis.md` / `interpretation.md` 等正文型成稿，但关键数字与论断必须可在 `evidence_table.json` 中找到出处；
+   - 调用脚本命令修复或重算，不得用文本编辑覆盖脚本输出。
+3. 禁止编造科学数据、缺失软件状态、golden_standard、平台评分或 benchmark 分数。平台会记录真实运行。官方基线未提供时，不得自造对照评分。
+4. 任何情况下脚本必须 exit 0；分析失败、材料缺失、解析失败都要写入 `errors` / `degradations` / `pending_human` 后返回 0。
+5. 所有分析开始前先写 partial `result.json`；分析结束后必须 finalize 覆盖。
+
+## 1. 单命令全流程入口
+
+首选命令：
+
+`python3 scripts/main.py run --input /input --output /app/output --work /app/work`
+
+该命令内部顺序执行：
+
+1. `init`：盘点输入、生成来源台账、抽取候选数据集、识别冲突分组。
+2. `check`：若存在 `${WORK}/draft.json`，校验其 claims、locator、quote、契约覆盖；若不存在，进入确定性兜底。
+3. `build`：使用 Agent draft 或脚本自动抽取的工作稿，执行清洗、统计、检验、效应量、置信区间、图表、报告，生成全部 `/app/output` 交付物，并 finalize `result.json`。
+4. `selfcheck`：核对产物、契约、证据、来源和磁盘文件，写 `selfcheck_report.json`。
+
+也可以分步执行：
+
+`python3 scripts/main.py init --input /input --output /app/output --work /app/work`
+
+`python3 scripts/main.py check --input /input --output /app/output --work /app/work`
+
+`python3 scripts/main.py build --input /input --output /app/output --work /app/work`
+
+`python3 scripts/main.py selfcheck --input /input --output /app/output --work /app/work`
+
+所有命令均不依赖当前工作目录；`--help` 可查看参数。优先用标准库，离线运行，Python >= 3.8。
+
+## 2. 目录与运行契约
 
 | 项 | 约定 |
 |-|-|
-| 输入 | `/input/case.json`、`/input/task.md`，以及题面规定的材料（CSV/TSV/TXT/SQLite/PDF/DOCX/图片等）。必须真实解析内容，不得按文件名或领域标签猜测/补造 |
-| 工作目录 | `/app/work`：中间解析、临时表、核验草稿；不污染原始 `/input` |
+| 输入 | `/input/case.json`、`/input/task.md` 以及题面提供的原始材料。必须真实解析内容，不得依据文件名、领域标签或已知数据集名称补造数据 |
+| 工作目录 | `/app/work`：存放 `ledger.json`、`draft.json`、`draft.auto.json`、`check_report.json`、`parsed/`、`raw_snapshot/`、`agent_review.json` 等 |
 | 输出目录 | `/app/output`：所有最终交付物与 `result.json` |
-| 调用 | `python3 scripts/main.py --input /input --output /app/output`；`--help` 可用；不依赖 CWD |
-| 依赖 | 仅 Python 标准库（≥3.8）；无网络；不写 `/input` |
-| 退出码 | 恒为 0；异常写入 `errors`/`degradations` 后仍返回 0 |
-| 首写 | 任何分析开始前先写 partial `result.json`；末尾无条件 finalize 覆盖 |
-| 确定性 | 分组排序固定（n 降序、值升序）；bootstrap 种子由 `zlib.crc32(标签+盐)` 派生；浮点按 `%.12g` 序列化 |
+| 退出码 | 恒为 0；错误不得让进程崩溃 |
+| 写入限制 | 不写 `/input`；不依赖网络；不依赖未在 `environment/resources.yaml` 声明的工具 |
+| 确定性 | 分组排序固定；bootstrap/permutation 种子由 `zlib.crc32(case_id + source_id + method + salt)` 派生；浮点按可复现精度序列化 |
 
-## 2. 执行流程：从盘点输入到最终 result.json
+## 3. 阶段 1：init 盘点与台账
 
-### 步骤 0：先落盘 partial 并初始化
-**输入**：`/input/case.json`（可能不存在或损坏）。  
-**动作**：读取或容错发现 `case_id`；读取 `output_contract` 原样透传；若契约缺失，使用标准契约字段：`descriptive`、`hypothesis_tests`、`effect_sizes`、`confidence_intervals`、`cleaning`、`interpretation`、`sources`、`uncertainty`、`pending_human`，并标记 `contract_missing=true`。立刻在 `/app/output/result.json` 写 partial：`status="partial"`，所有契约字段空值/空数组，`errors`/`degradations`/`pending_human` 初始。  
-**输出**：首个 honest partial `result.json`。  
-**失败分支**：`/app/output` 不可写则写 `/app/work/result.json` 并记录；继续。
+`init` 必须真实完成以下工作：
 
-### 步骤 1：盘点输入
-**输入**：`/input` 目录树。  
-**动作**：递归列出文件大小、类型；读取 `case.json` 与 `task.md` 原文；识别材料类别（表格、数据库、PDF、DOCX、图片、字典）；编码探测 UTF-8/BOM/GB18030/Latin-1；记录哪些文件可读。**不依据文件名/领域标签推断内容**。  
-**输出**：`sources` 初始清单（路径、大小、类型、可读状态）。  
-**失败分支**：文件不可读 -> 写 `errors`/`degradations`，不中断。
+1. 读取 `/input/case.json` 与 `/input/task.md`，提取 `case_id` 与 `output_contract`。若 `case.json` 缺失或损坏，使用标准契约字段并标记 `contract_missing=true`。
+2. 递归列出 `/input` 文件；记录路径、扩展名、大小、SHA-256、可读状态、文本编码探测结果。
+3. 识别材料类型：CSV、TSV、TXT、SQLite、PDF、DOCX、图片、数据字典、JSON、Markdown。
+4. 生成来源台账 `sources`，每条来源分配 `source_id`：`S1`、`S2`、`S3`……
+5. 真实解析候选数据：
+   - CSV/TSV/TXT：按内容检测分隔符；首行纯数值时命名 `col1..colN`；保留原值。
+   - SQLite：读取所有业务表，记录 schema、行数、字段类型；按数据字典或主表选择实际分析表。
+   - PDF：使用 `environment/resources.yaml` 中列出的解析工具提取文本/表格到 `/app/work/parsed/`。
+   - DOCX：使用可用工具提取段落与表格；无法解析则记 `pending_human`。
+   - 图片：需要 OCR；不可用则记 `unsupported_material`。
+6. 读取数据字典：字段名、单位、类型、取值约束、说明。字典单位优先于列名推断；单位不明不得静默换算。
+7. 候选抽取与冲突分组：
+   - 识别主分析表；
+   - 比较数据字典与数据表字段；
+   - 将单位不一致、重复记录冲突、数据库与平面文件冲突、同一字段不同来源冲突分组记录。
 
-### 步骤 2：用工具真实解析材料
-**输入**：步骤 1 清单中的材料文件。  
-**动作**：
-- CSV/TSV/TXT：真实读取单元格；分隔符按首行投票；首行纯数值时命名 `col1..colN`；原值保留。
-- SQLite：读取所有业务表，按行数最多选表，记录 `sources.relation`。
-- PDF：使用 `pdf-text-tool` 或 `environment/resources.yaml` 提供的等价工具提取文本/表格到 `/app/work/parsed/`；若为扫描图片且无 OCR，标注不支持。**禁止从文件名补造表格**。
-- DOCX：使用可用解析工具提取段落和表格；无法解析则标 `pending_human`。
-- 图片：需要 OCR；不可用则记录 `degradations`。
-- 数据字典：从 JSON/MD 真实读取字段名、单位、说明；字典单位优先于列名推断。
-- 字段类型：日期形如 `YYYY-MM-DD` / `YYYY/MM/DD` 判为非数值，只作分类描述，不进推断与相关。  
-**输出**：解析后的材料快照、标准 CSV/TSV（如需交给脚本）。  
-**失败分支**：无法解析 -> 保留原始限制说明，`status=input_error` 或 `insufficient_evidence`，仍继续写出合法 result.json。
+产物：`${WORK}/ledger.json`、`${WORK}/parsed/`、`${WORK}/raw_snapshot/` 或材料哈希清单，以及 `/app/output/result.json` 首个 partial 版本。
 
-### 步骤 3：运行基线脚本，生成全套基线交付物
-**输入**：`/input` 与 `/app/work/parsed` 中可被脚本识别的主数据表。  
-**动作**：运行 `python3 scripts/main.py --input /input --output /app/output`；若主数据表来自 PDF/DOCX 解析，将解析后的 CSV 放在 `/app/work` 并确保脚本能读取，但其 `sources` 仍指向原始材料与解析中间文件。脚本生成清洗、描述统计、检验、效应量、CI、报告、图表数据。**如果脚本崩溃**，用已读取的真实材料手工生成最小完整交付物。  
-**输出**：`/app/output/result.json`（基线 finalize）、`analysis.md`、`cleaned.csv`、`tables/*.csv`、`run.log`。  
-**失败分支**：脚本失败 -> 保留错误，Agent 用解析材料写出最小合法结果；绝不因脚本失败而空输出。
+`result.json` 首写内容至少包含：
 
-### 步骤 4：Agent 亲自核对与推导成品
-**输入**：基线全套 + 原始材料 + task.md 评分点。  
-**动作**：你必须亲自打开并核对关键数字与材料：n、缺失/异常/重复计数、单位、检验方法是否与设计/分布假设匹配、p/效应量/CI 是否一致、结论是否恰当。对照 rubric 和 output_contract 逐项检查。若基线有误或与材料冲突，在 `analysis.md` 中修订，并把修订依据写 `changes`/`conflicts`。无法确认或口径不明标 `pending_human`/`limitations`，不得编造。把本次 Agent 核验证据写入 result.json：`reviewed_by_agent`、`agent_checks`、`conflicts`、`pending_human`、`uncertainty`。  
-**输出**：增强后的完整交付物。  
-**失败分支**：预算不足或 Agent 无法完成核验 -> 保留基线全部产物，标注 `reviewed_by_agent=false` 与原因；仍要求契约字段完整。
+`case_id`、`status="partial"`、`sources`、`output_contract`、空 array 的 `errors`、`degradations`、`pending_human`、`uncertainty`。
 
-### 步骤 5：可编辑产物预览
-**输入**：`/app/output` 下可编辑 Office/幻灯片/图形产物（如有）。  
-**动作**：使用环境提供的渲染工具生成 PDF/PNG；真实渲染，不得用占位图。如果本题无此类产物，跳过。  
-**输出**：PDF/PNG 预览。  
-**失败分支**：渲染失败 -> 写 `degradations`，保留可编辑文件，不伪造。
+## 4. 阶段 2：Agent-first 路径与 draft.json
 
-### 步骤 6：自检 rubric 并回填最终 result.json
-**输入**：`/app/output` 所有文件与结果草稿。  
-**动作**：逐项执行第 7 节自检清单；核对 `output_
+若预算允许，Agent 应采用 Agent-first 路径：
+
+1. 先执行 `init`，阅读 `${WORK}/ledger.json`。
+2. 真实打开原始数据、数据字典与 `task.md`。
+3. 判断：
+   - 主分析表是哪一个；
+   - 字段单位与类型；
+   - 清洗规则：缺失、异常、重复如何认定；
+   - 研究设计：两独立组、配对、多组、分类关联、相关等；
+   - 检验方法选择；
+   - 效应量与置信区间口径；
+   - 哪些结论可写，哪些只能标 pending_human。
+4. 将判断写入 `${WORK}/draft.json`。
+
+`draft.json` 建议形状：
+
+`case_id`、`primary_data`、`cleaning_decisions`、`analysis_decisions`、`claims`、`conflicts`。
+
+每个 claim 至少含：
+
+`claim_id`、`kind`、`statement`、`source_id`、`locator`、`quote`、`confidence`、`support_scope`。
+
+其中 `kind` 取值可为 `cleaning`、`descriptive`、`test`、`effect_size`、`confidence_interval`、`interpretation`。`confidence` 取值 `high`、`medium`、`low`、`unverifiable`。
+
+若 Agent 预算不足，可跳过写 draft.json，直接使用 `run` 的确定性兜底。
+
+## 5. 阶段 3：check 校验
+
+`check` 对 `${WORK}/draft.json` 进行机器校验：
+
+1. `source_id` 必须存在于 ledger。
+2. `locator` 必须能定位到实际文件、行号或段落号。
+3. `quote` 必须能在来源中找到，或标记 `quote_normalized=true`。
+4. 关键数字、检验方法、效应量必须与输出契约对应。
+5. 不得出现无来源数字、与原文冲突的数值、空 claim。
+6. 未覆盖契约字段时报告 warning，不阻断后续。
+
+产物：`${WORK}/check_report.json`。
+
+若 `check` 失败或 draft 缺失，`build` 不得空输出，必须走确定性兜底。
+
+## 6. 阶段 4：build 与确定性兜底
+
+`build` 必须确保两条路径产出同一套产物与同一份 `result.json` 契约。
+
+### 6.1 无 draft 时的确定性兜底
+
+若 `${WORK}/draft.json` 不存在、非法或 `check` 未通过：
+
+1. `build` 使用 ledger 中的主表与数据字典，确定性生成实质性工作稿。
+2. 工作稿写入 `${WORK}/draft.auto.json`。
+3. 每个关键数字和规则必须带 `verbatim quote` 与 `locator`。
+4. 在 `result.json.degradations` 中记录 `AUTO_EXTRACT`，说明“无 Agent draft，使用脚本确定性抽取”。在 `gaps` 中也保留同样信息。
+5. 该兜底不得生产无来源数字；拿不到依据时写入 `pending_human`。
+
+### 6.2 数据清洗
+
+必须覆盖七类关键情形：缺失值、异常值、重复记录、统计假设、图表选择、代码运行、数据库字段。
+
+清洗规则：
+
+- 缺失值：识别空白、`NA`、`N/A`、`null`、`.`、`NaN`、`?` 等；不得把缺失当 0；不得无说明整行删除。记录删除/填补前后样本量。
+- 异常值：默认用 Tukey IQR 栅栏或 MAD 稳健 z 检测，只标记，不自动删除。若任务或数据字典明确允许删除，才删除，并保留规则、阈值与前后样本量。
+- 重复记录：完全重复行默认去重并保留 `duplicate_id`；部分重复只在数据字典给出主键时判断。记录删除条数与理由。
+- 单位与类型：数据字典优先；未明单位不换算；日期字段不进入推断统计；数据库字段记录 schema、表名、查询来源。
+- 每次清洗动作必须有 `rule_id`、`before_count`、`after_count`、`source_id`、`locator`。
+
+产物：`cleaned.csv`、`cleaning_rules.json`、`cleaning_report.md`。
+
+### 6.3 描述统计
+
+对连续变量报告：有效样本量 n、组样本量、均值、标准差、中位数、IQR、最小值、最大值、分位数、偏度、峰度。对分类变量报告水平频数与比例。关键数字须带 `[S#]` 与 locator。
+
+产物：`descriptive_stats.json`、`descriptive_stats.csv`。
+
+### 6.4 推断统计选择
+
+不得把多组问题塞进两样本 t 检验；必须先做假设检查；多重比较必须校正。
+
+方法选择：
+
+| 研究设计 | 条件 | 方法 |
+|-|-|-|
+| 两独立组 | 正态且方差齐 | Student t |
+| 两独立组 | 正态但方差不齐 | Welch t |
+| 两独立组 | 非正态或小样本 | Mann-Whitney U |
+| 配对两组 | 差值正态 | paired t |
+| 配对两组 | 差值非正态 | Wilcoxon signed-rank |
+| 多独立组 | 正态且方差齐 | one-way ANOVA |
+| 多独立组 | 正态但方差不齐 | Welch ANOVA |
+| 多独立组 | 非正态 | K

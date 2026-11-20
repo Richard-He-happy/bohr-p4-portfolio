@@ -1,150 +1,304 @@
 ---
 name: sci-data-cleaning
-description: Audit-grade cleaning of scientific tabular data. Classifies missing/censored/sentinel values without statistical imputation, canonicalises numeric/date/unit/encoding faults with recorded reversible transforms, resolves duplicate records under a dictionary-derived key, and emits an analysis-ready table plus a field-level quality report whose numbers are re-derived from the emitted tables. Use when a case supplies dirty CSV/TSV/PDF/DOCX table transcriptions, a data dictionary and a cleaning workorder.
-version: 1.3.0
+description: >-
+  Audit-grade cleaning of scientific tabular data. Reads actual /input case files and actual source tables without a pre-extracted answer layer, classifies missing/censored/sentinel values without statistical imputation, canonicalises numeric/date/unit/encoding faults with reversible source-linked transforms, resolves duplicate records under dictionary-derived keys, and emits analysis-ready tables plus field-level quality reports and result.json under the official runtime contract. Use when a case provides dirty CSV/TSV/PDF/DOCX table transcriptions, a data dictionary, and a cleaning workorder.
+version: 1.4.0
 ---
 
-# sci-data-cleaning（科研数据清洗与处理）
+# 科研数据清洗与处理：可复核清洗流水线
 
-## 0. 最高优先级：完整性优先（v6）
+## 0. 铁律（最高优先级，先读）
 
-**脚本只是工具，最终交付物由你（Harness Agent）亲自读材料、推导、撰写/制作。** 禁止把脚本骨架、模板或未审阅的中间产物直接当成品提交。
+1. 以 /input 实际文件为唯一事实依据。不要按文件名、领域标签或记忆补造数据；不得生成金标准、白板或 benchmark 分数。
+2. 禁止统计填补：不推断总体统计量，不填补缺失或无效源值。缺失、低于检出限、未检测、真值 0 必须分开标记。
+3. 所有输出中的关键数字、判断、规则必须有来源：`[S#]` 来源编号 + `文件#行号/段落号` locator。不能核验的数字不得写进结论。
+4. 结构化 JSON 由脚本生成或被脚本校验。不得手工篡改脚本输出的 `result.json`、`evidence_table.json` 结构；需要更正时用脚本或把修订写入 changes/pending_human。
+5. 不依赖 quality-gold.md 或任何未提供的金标准文件；隐藏来源与故障 provenance 只能从实际材料中读取。
+6. 退出必须成功：无论失败或部分完成，必须落盘合法 result.json 并确保命令退出 0。部分结果要标明 limits。
+7. 只处理题面五类：缺失值、异常值、重复记录、格式/单位/编码转换、数据质量报告。不做统计建模、不做出版级图表，除非 task.md 明确要求。
 
-进入任务后必须先运行本 Skill 自带脚本/流程，产出**全套基线交付物**，再在此基础上做核验与改进。后续改动只能增强基线，不得删除、清空或遗漏任何基线产物与 `output_contract` 字段。若不确定字段含义，保留原产物并在 `result.json` 中记录 `reviewed_by_agent`。提交前必须逐项核对「output_contract 字段 × 磁盘文件 × result.json 键」，任何缺项先补齐再收尾。
+## 1. 单命令入口与双路径
 
-## 1. 用途与边界
+### 1.1 首选单命令
 
-对给定脏表完成题面约定的**五类处理**，交付可复核证据链：
+    python3 /skills/weekly-skill/scripts/main.py run \
+      --input /input \
+      --output /app/output \
+      --work /app/work
 
-| 类别 | 本 Skill 做什么 |
+该命令内部顺序完成 init → build → selfcheck：
+
+- init：盘点 /input，建立来源台账、候选表、字典、workorder、冲突分组，写 /app/work/ledger.json；
+- build：校验/兜底抽取，生成全套结构化产物与初步 result.json；
+- selfcheck：按 output_contract 和一致性断言检查产物，写 verification.json/assertions.json。
+
+如果实际安装版本的 `main.py` 不支持 run 子命令，使用兼容命令：
+
+    python3 /skills/weekly-skill/scripts/main.py --input /input --output /app/output
+
+但首选 run，因为它体现 init→build→selfcheck 并显式写 /app/work。
+
+### 1.2 Agent-first 增量路径（预算允许时）
+
+如果能够读到 /app/work/ledger.json：
+
+1. 读台账和原始材料，逐字段判断角色、单位、缺失哨兵、异常阈值、主键、重复保留规则；
+2. 将决策写入 `/app/work/draft.json`。`draft.json` 只许引用实际文件中的词典/workorder/表格证据；每个字段必须带 locator；
+3. 运行：
+
+       python3 /skills/weekly-skill/scripts/main.py check --work /app/work --output /app/output
+       python3 /skills/weekly-skill/scripts/main.py build --work /app/work --output /app/output
+
+`check` 校验 draft 与 ledger 冲突；`build` 将 draft 与确定性抽取结果合并。若脚本不支持子命令，回退到完整 run 命令，并把人工判断写入 `agent_review.json` 而不是 draft。
+
+### 1.3 无 draft 时
+
+`build` 不得等待 draft。它必须用 ledger 中的确定性规则完成实质抽取：逐字 quote + locator，并在 `degradations` 中诚实记录 `AUTO_EXTRACT`。因此预算紧张时可直接单命令交付。
+
+## 2. 目录与最小交付物
+
+输入：
+
+- `/input/case.json`
+- `/input/task.md`
+- `/input/**` 其他材料（CSV/TSV/TXT/PDF/DOCX/图片等）
+
+工作区：
+
+- `/app/work/ledger.json`
+- `/app/work/extracted/`
+- `/app/work/draft.json`（Agent 可选）
+- `/app/work/sources.json`
+
+最终输出必须至少包含：
+
+- `result.json`
+- `cleaned.csv`
+- `field_issues.csv`
+- `duplicates.csv`
+- `transform_log.csv`
+- `cleaning_rules.json`
+- `quality_report.md`
+- `evidence_table.json`
+- `report_consistency.json` 或 `assertions.json`
+- `sources.json`
+- `run.log`
+- `pending_human.json`
+- `agent_review.json`（Agent 核验，可选但推荐）
+
+若 task.md 要求图片/Office/图表：
+
+- 可编辑原件放 /app/output；
+- 同时渲染 PDF/PNG 预览供检查；
+- 图表代码/数据放 /app/output，不得以截图冒充可复核文件。
+
+## 3. 执行流程
+
+### 步骤 1：读 case 与盘点
+
+- 读 `/input/case.json`（不存在则找 `case*.json`）。
+- 提取 `case_id`、`output_contract`、`files`、`data_dictionary`/`fields`/`columns`/`schema`、`workorder`。
+- 键名按去分隔符小写匹配，不假设固定键。
+- 递归扫描 /input，列出所有文件、大小、sha256、可识别格式。
+- 输出：来源台账。
+
+失败处理：
+
+- case.json 缺失/坏 JSON：尝试其他 case*.json；仍失败记 `input_error`，继续扫描其余材料。
+
+### 步骤 2：解析实际材料
+
+- CSV/TSV/TXT：读取并保存未加工副本；检测编码、分隔符、BOM 等。
+- PDF：用平台 pdf-text-tool 提取文本/表格，保存到 /app/work/extracted/；不得按文件名假设内容。
+- DOCX/图片：用平台可用工具提取；无法提取则写 pending_human 和 degradations，不猜测。
+- 主表选择：case.json 中指定文件优先；否则取可解析行数最多的表；将其他表作为来源或 lookup 表，计入 sources。
+- 字典优先级：独立字典文件 > case.json 内联 data_dictionary。字段名大小写/标点/单位分隔符归一后匹配。
+
+### 步骤 3：运行 init / ledger
+
+- 执行 run 或 init 子命令。
+- 检查 /app/work/ledger.json 是否包含：
+  - source inventory：id、文件、locator、sha256、parser；
+  - 候选表/列；
+  - 字典字段语义、单位、QC 规则；
+  - workorder 指令；
+  - 冲突/歧义分组。
+- 若 ledger 缺项，补写 /app/work/draft.json 或 agent_review.json，不手工改脚本结构化文件。
+
+### 步骤 4：制定字段级规则
+
+按五类给每列生成规则，写入 draft（或让 build 确定性生成）。规则必须包含：
+
+- `rule_id`
+- `field`
+- `action`
+- `source_id`
+- `locator`
+- `missing_reason_code`（缺失类型映射）
+- `unit`、`conversion_factor`、`conversion_reversible`
+- `anomaly_lower`、`anomaly_upper`、`method`
+- `duplicate_key`
+- `keep_rule`
+
+缺失值处置原则：
+
+| 情况 | 处理 |
 |---|---|
-| 缺失值 | 区分 `blank / not_detected(ND) / below_LOQ(＜LOD) / sentinel(-999)`，写出缺失原因码，**不做统计填补** |
-| 异常值 | 字典物理上下限（硬越界）+ 稳健分布判据（MAD-z，退化到 IQR）双判据，**只标记不删除** |
-| 重复记录 | 由字典主键推断复合键；大小写/空格/分隔符/前导零归一后判重；保留最完整记录，其余进 `duplicates.csv` 隔离 |
-| 格式/单位/编码 | 千分位、小数逗号、科学计数、脚注符、尾随单位、日期格式、GBK 乱码；换算因子与编码修复全部记录，**可逆** |
-| 质量报告 | 字段级问题清单 + 五类汇总，报告数字由 `verify.py` 从产出表反算校验 |
+| 空格/空字符串 | 标记 `missing_reason_code=blank`，原值保留 |
+| "ND"/"未检出" | 标记 `not_detected`，不填 0 |
+| "<LOD"/"低于检出限" | 标记 `below_LOQ`，保留符号与检出限 |
+| -999 / -99 / sentinel | 标记 `sentinel`，不参与统计 |
+| 真值 0 | 标记 `zero`，不得归为缺失 |
 
-**不做**：统计建模与假设检验、图表美化、数据库运维、实验方案设计、论文写作；不做均值/中位数填补，不推断总体统计量，不填补缺失或无效源值（题面运行时契约明确禁止）。自带脚本只稳定处理 CSV/TSV/TXT；对 PDF/DOCX/图片，必须由 Agent 先用平台工具真实解析出文本/表格，再进入清洗流程，不得跳过或按文件名猜测内容。
+异常值处理：
 
-## 2. 触发条件
+- 硬越界来自字典物理上下限；
+- 软异常用 MAD-z（退化 IQR）判定；
+- 只标记不删除，除非 task.md 明确要求剔除。
 
-- 用户给出**脏表格 + 数据字典/字段说明 + 清洗要求**，要求交付清洗表、质量报告、可复现证据。
-- 用户报告“报告数字与清洗表不一致”“单位/编码不统一”“同一样品重复”“缺失值处理不清”。
-- 不适用：只需要画图/建模；只有正文无表格；需要从原始 PDF 推断总体统计量或做统计填补。
+重复记录处理：
 
-## 3. 运行时契约与目录约定
+- 主键由字典/workorder 指定；缺失时用整行，只去完全重复；
+- 归一：大小写、空格、分隔符、前导零、单位写法；
+- 保留最完整记录，其余进 duplicates.csv，并注明保留依据。
 
-```bash
-cd /app/work
-python3 /skills/weekly-skill/scripts/main.py --input /input --output /app/output
-python3 /skills/weekly-skill/scripts/verify.py --output /app/output
-```
+格式与单位处理：
 
-- 输入只读 `/input`（含 `case.json`、`task.md`、表格、字典及其他材料），工作目录 `/app/work`，最终产物只写 `/app/output`。
-- 若脚本安装在 `/skills/weekly-skill`，使用上述路径；若路径不同，以实际安装目录为准。脚本不依赖 CWD，内部用 `Path(__file__).resolve().parent` 定位 `references/`。
-- 纯标准库，不联网、不 pip、无随机种子；行序=源文件行序，浮点 `%.12g`。
-- **退出码恒为 0**，失败写入 `result.json` 的 `errors`，不抛栈、不静默。
-- 可编辑 Office/幻灯片/图形产物若被产出，必须额外渲染 PDF/PNG 预览；本题通常交付 CSV/JSON/MD，但若平台要求渲染则执行。
+- 处理千分位、小数逗号、科学计数、脚注符、尾随单位、日期格式、编码乱码；
+- 每个转换必须记录前后值、规则和 locator，保持可逆或保留原始映射表。
 
-## 4. 输入盘点与材料真实解析
+### 步骤 5：build 生成全套产物
 
-1. 读 `/input/case.json`（若无则找 `case*.json`）获取 `case_id`、`output_contract`、`files`、`data_dictionary`、`workorder` 等；键名按去分隔符小写匹配，不假设固定键。
-2. 读 `/input/task.md` 获取题目约束、评分要求与输出规定。
-3. 递归扫描 `/input`：`.csv/.tsv/.txt/.dat` 是数据表候选；`.md/.json/.docx` 是字典/任务说明候选；`case.json` 本身不是数据表。
-4. **真实解析每个材料**：CSV/TSV/TXT 直接读取；PDF 用平台提供的 `pdf-text-tool` 或其他文档解析工具抽取文本/表格，DOCX 用可用解析库抽取表格/段落，图片表格用 OCR 或平台工具识别并复核。将抽取结果保存到 `/app/work/extracted/`，并记录提取方式。
-5. 主表选择：`case.json` 中明确提到的文件名优先；否则取行数最多者，其余表登记进 `sources`。
-6. 字典优先级：独立字典文件（Markdown 管道表 / JSON / DOCX）→ `case.json` 内联 `data_dictionary/fields/columns/schema`。字段名去标点小写对齐，允许 `NO3_mgL` 与 `no3 mg/l` 匹配。
-7. 表头括号内单位（`浓度 (mg/L)`）作为该列单位提示；字典 `unit` 列优先。
-8. 若材料缺失、损坏或无法解析：逐条写 `pending_human`，不臆造数据、引用或分数。
+必须生成：
 
-## 5. 本题专属执行流程
+1. `cleaned.csv`：包含 `__source_id`、`__locator`、`__row_id`、清洗字段、缺失/异常标记列；保留原值或引用 transform_log；
+2. `field_issues.csv`：每字段每类问题计数与来源；
+3. `duplicates.csv`：重复组、保留行、删去行、归因；
+4. `transform_log.csv`：每个单元格转换前后、规则、来源、是否可逆；
+5. `cleaning_rules.json`：字段级规则外置；
+6. `quality_report.md`：字段级问题清单、动作、影响范围；每个数字从上面表中反算；
+7. `evidence_table.json`：每个关键 claim 含 `claim_id, source_id, locator, quote, strength, support_scope`；
+8. `report_consistency.json`/`assertions.json`：机器校验断言；
+9. `run.log`、`sources.json`、`pending_human.json`。
 
-**步骤 1：盘点输入**
-- 输入：`/input/case.json`、`/input/task.md`、目录列表。
-- 动作：读取 `case.json` 与 `task.md`，扫描材料，建立文件清单、`output_contract` 字段清单、字典/主键/workorder 候选。
-- 输出：输入清单、契约键列表、清洗目标。
-- 失败：`case.json` 缺失或坏 JSON → 尝试其他 `case*.json`；仍失败则 `status=input_error` 并继续可处理部分。
+### 步骤 6：Agent 核验与成稿
 
-**步骤 2：真实解析材料**
-- 输入：文件清单。
-- 动作：按第 4 节解析每个数据表、字典、workorder；保留源文件 sha256；抽取产物写入 `/app/work/extracted/`。
-- 输出：可读取的数据表、字典、workorder；`sources` 哈希表。
-- 失败：格式不支持、文件损坏或 OCR 无法识别 → 写入 `degradations`/`errors`，标 `pending_human`，绝不猜测内容。
+- 抽查每列角色、单位、哨兵、异常阈值；
+- 随机抽 3-5 组原值→清洗值，核对 quote/locator；
+- 检查质量报告数字是否由 field_issues.csv/cleaned.csv/duplicates.csv 反算；
+- 写 `agent_review.json`：claim_id → verified/rejected/reason，script_fixes；
+- 若报告与表不一致：必须修正。优先改脚本/规则重跑；不能修则写 pending_human 和 errors，不得静默；
+- 正文型交付物（如 task 要求结论）只引用 evidence_table 中已有 claim，不得新造数字。
 
-**步骤 3：运行基线脚本生成全套产物**
-- 输入：解析后的材料路径。
-- 动作：执行 `scripts/main.py --input /input --output /app/output`，生成基线文件；再执行 `scripts/verify.py --output /app/output` 做一致性校验。
-- 输出：`/app/output` 下全集产物 + `result.json` 初稿。
-- 失败：脚本异常 → 捕获堆栈写入 `errors`，仍须按输出契约手动生成必要文件，保证 `result.json` 合法。
+### 步骤 7：selfcheck 与 result.json
 
-**步骤 4：Agent 亲自核验证据与推导一致性**
-- 输入：基线产物、原始解析材料、字典/workorder。
-- 动作：逐列核对字段角色、单位、缺失哨兵、异常阈值是否与字典一致；抽查若干原值→清洗值；核对报告数字是否由表反算；检查重复记录保留是否合理；必要时重新推导补齐缺口。
-- 输出：核验记录（`verified`、`pending_human`、`conflicts`）及修订清单。
-- 失败：发现不一致 → 修正规则/产物，记录 `changes`；无法判断 → 保留原值并标 `pending_human`。
+- 验证 `output_contract` 所有原始字段都有对应文件和 result.json 键；
+- result.json 双回显：契约字段（含 case_id）在顶层与 nested `output_contract` 各出现一次；
+- result.json 必须含：
+  `case_id`, `status`, `sources`, `summary`, `artifacts`, `uncertainty`, `pending_human`, `errors`, `degradations`, `changes`, `reviewed_by_agent`, `output_contract`。
 
-**步骤 5：产出完整成品并增量改进**
-- 输入：核验结果与修订清单。
-- 动作：更新清洗表、日志、报告、`result.json`；补齐所有 `output_contract` 字段；若有可编辑 Office 产物则渲染 PDF/PNG 预览。
-- 输出：最终 `/app/output` 全套交付物。
-- 失败：预算/时间不足 → 保留当前部分结果，标 `status=partial`，列出缺失项。
+status 取值：
 
-**步骤 6：自检 rubric 并回填 `result.json`**
-- 输入：`/app/output` 与契约字段清单。
-- 动作：逐项执行第 9 节自检清单；确认 `result.json` 含 `case_id` 及 `output_contract` 全部键；审核状态、来源、不确定性、变更记录真实；确认退出码 0。
-- 输出：合法 `result.json`。
-- 失败：契约字段缺失 → 补齐；无法补齐 → 写入 `unresolved_contract_fields` 并标 `partial`，不得删键。
+- `success`：所有契约字段完整且自检通过；
+- `partial`：有交付但不完整/存在未解决问题；
+- `input_error`：输入缺失/损坏无法完整执行；
+- `insufficient_evidence`：无数据表或无法处理。
 
-## 6. 预算策略（64 次请求 / 900 秒）
+- 失败把错误写入 `errors` 和 `degradations`，不得抛栈；
+- 最终退出码 0。
 
-总预算 64 次模型请求，3 个固定案例，单案例目标 **≤20 次请求**。分配如下：
+## 4. result.json 契约示例
 
-| 步骤 | 请求次数 | 必须/可选 |
-|---|---|---|
-| 盘点输入 | 1-2 | 必须 |
-| 解析材料 | 2-5 | 必须；每个 PDF/DOCX 解析算 1 次 |
-| 运行脚本+verify | 1-2 | 必须；脚本不占用模型请求，仅结果读取 |
-| 核验关键字段/抽查 | 3-6 | 必须，至少抽查 3-5 组关键原值 |
-| 修订与补齐 | 2-4 | 按需，发现不一致才做 |
-| 自检回填 | 1-2 | 必须 |
+    {
+      "case_id": "case-001",
+      "status": "success",
+      "sources": [
+        {"id": "S1", "file": "table1.csv", "locator": "table1.csv#L1-L50", "sha256": "...", "parser": "python_csv"}
+      ],
+      "summary": {
+        "n_source_rows": 100,
+        "n_cleaned_rows": 98,
+        "n_missing_cells": 10,
+        "n_anomalies": 3,
+        "n_duplicate_groups": 2
+      },
+      "artifacts": {"cleaned_table": "cleaned.csv"},
+      "uncertainty": [],
+      "pending_human": [],
+      "errors": [],
+      "degradations": [],
+      "changes": [],
+      "reviewed_by_agent": true,
+      "cleaned_table": "cleaned.csv",
+      "field_issues": "field_issues.csv",
+      "quality_report": "quality_report.md",
+      "output_contract": {
+        "case_id": "case-001",
+        "cleaned_table": "cleaned.csv",
+        "field_issues": "field_issues.csv",
+        "quality_report": "quality_report.md"
+      }
+    }
 
-- **尽早落盘 honest partial**：步骤 3 完成后立即保存 `result.json`，确保 `status`、`sources`、`artifacts` 等真实存在。
-- 若单案例接近 20 次或运行接近 840 秒，停止改进，保留 partial，无条件 finalize。
-- 禁止无意义循环、重复读同一文件或重新清洗无变化数据；无需对所有行逐行人工核验，按字段级和随机抽查即可。
+注：示例仅为接口说明；实际受 case.json 的 output_contract 驱动，不得用示例冒充正式结果。
 
-## 7. 隐藏案例鲁棒性与降级
+## 5. 隐藏案例鲁棒性
 
-任何情况下都必须产出合法 `result.json`，退出码 0。
+任何情况下都必须生成 `result.json` 并退出 0。
 
-| 情形 | 处置 |
+| 情形 | 必要响应 |
 |---|---|
-| `case.json` 缺失/坏 JSON | 扫描其他 `case*.json`；仍失败记 `errors=[CASE_MISSING]`，`status=input_error`，继续扫描目录 |
-| 无数据表 | `status=insufficient_evidence`，`pending_human=[NO_TABLE]`，输出空 `result.json` |
-| 空表（仅表头） | 正常产出空清洗表与质量报告，`n_rows=0` |
-| 无字典/主键/workorder | 键回退整行，只去完全重复；写 `pending_human=[KEY_NOT_FOUND]` |
-| 全列缺失 | 该列 `missing_pct=100`，仍出现在 `field_issues.csv` |
-| PDF/DOCX/图片无法解析 | 写 `degradations=[UNSUPPORTED_FORMAT]` 或解析错误，提示转 CSV/TXT；不猜测内容 |
-| 编码乱码 | 多编码打分 + GB18030 回解，写 `degradations` |
-| 单位不明 | 保留原值 + `U2`，写 `uncertainty` |
-| 主键冲突且值冲突、日期 `d/m` 与 `m/d` 均合法、`1,234` 千分位/小数歧义 | 保留原值、打标记、写 `pending_human/uncertainty`，不擅自选边 |
-| 输出目录不可写 | 依次退到 `./output`、系统临时目录 |
-| 超时 | 900 秒内留 60 秒收尾；到 840 秒必须停止一切改进，写入 `result.json` 并退出 |
-| 行数超限 | 脚本 `--rows` 控制上限，截断并写 `ROW_LIMIT` |
+| case.json 缺失/坏 JSON | 扫描 case*.json；仍失败记 input_error，继续目录扫描 |
+| 无数据表 | status=insufficient_evidence，pending_human=[NO_TABLE] |
+| 空表/仅表头 | 正常产出空 cleaned.csv/field_issues.csv，n=0 |
+| 无字典/主键/workorder | 整行去重，只去完全重复；写 KEY_NOT_FOUND；不猜主键 |
+| 全列缺失 | 列 missing_pct=100，仍在 field_issues.csv 中 |
+| PDF/DOCX/图片无法解析 | 记 UNSUPPORTED_FORMAT 或提取错误，写 pending_human；不猜测内容 |
+| 编码乱码 | 多编码打分，GB18030 回退；写 degradations |
+| 单位不明 | 保留原值 + U2，写 uncertainty |
+| 主键冲突且值冲突；日期 d/m 与 m/d 均合法；千分位/小数歧义 | 保留原值、打标记、写 pending_human/uncertainty；不擅自选边 |
+| 输出目录不可写 | 退到 ./output、系统临时目录，并在 run.log 说明 |
+| 超时 | 留 60 秒收尾；到 840 秒停止改进，finalize result.json |
+| 行数超限 | 截断并写 ROW_LIMIT 到 degradations |
 
-## 8. 评分维度 → 交付要求 → 自证方式对照表
+## 6. 预算策略
 
-| 评分维度 | 交付要求 | 自证方式 |
-|---|---|---|
-| 实际效果 40：任务完成度 15 | 五类处理均有 CSV 列与报告章节，每列都在 `field_issues.csv` | `cleaned.csv`、`field_issues.csv`、`quality_report.md` |
-| 实际效果 40：结果正确性 15 | 字段处理符合字典语义与量纲；异常判据与分布匹配；去重主键真实；单位/编码转换无损；报告数字与结果表一致 | 字典驱动规则、`transform_log.csv`、`assertions.json` 反算、`verify.py` |
-| 实际效果 40：结果完整性 5 | 覆盖约定五类处理；字段级问题清单；统计假设与图表选择依赖的记录被保留 | `field_issues.csv`、`stats.json`、报告章节完整 |
-| 实际效果 40：结果可核验性 5 | 输入、规则、日志、输出可独立复核并复跑 | `__src` 行号、`sources` sha256、`transform_log.csv` 原值、`run.log`、`assertions.json` |
-| 使用增益 25：质量增益 15 | 相同输入下比基础 Agent 更少误改、更一致 | 逐字段规则、拒绝统计填补、可逆转换、字典驱动去重 |
-| 使用增益 25：效率增益 5 | 减少人工改表与返工 | 一条命令端到端，`run.log` 显示无人工干预 |
-| 使用增益 25：增益可验证性 5 | 公平对照证明改善 | `assertions.json` 反算通过、`changes` 记录修订前后差异 |
-| 创新增益 15：新增能力 5 | 基础 Agent 难以稳定实现的字段级策略推断、跨表主键对齐、可逆映射、报告一致性自检 | `cleaning_rules.json` + 脚本输出 + 文档说明 |
-| 创新增益 15：方法改进 5 | 缺失分类、异常标记策略、近似重复归一、格式映射有实质改进 | `references/skill_guide.md` 方法说明 |
-| 创新增益 15：创新证据 5 | 证明创新点相对已有方案的边界与价值 | `references/skill_guide.md` 的适用边界与限制 |
-| 可靠体验 10：调用与易用性 3 | 正确触发，按说明完成一次清洗 | SKILL.md 指引、一条命令 |
-| 可靠体验 10：运行稳定性 4 | 不同表结构/编码/规模/重复运行稳定 | 标准库、确定性输出、无随机种子 |
-| 可靠体验 10：异常处理 3 | 对空表、全列缺失、乱码、单位不明、主键冲突、文件损坏等识别处置 |
+模型请求预算 64 次、900 秒。单案例目标 ≤20 次。
+
+优先级：
+
+1. 单命令端到端脚本产出全套基线（1-2 次调用）；
+2. 保存 honest partial result.json；
+3. 只对关键字段/随机样本核验（3-6 次）；
+4. 修补明显不一致（2-4 次）；
+5. 最后自检回填（1-2 次）。
+
+禁止无意义循环、重复读取同一文件、逐行人工全部复核。接近预算先落盘。
+
+## 7. 评分证据映射
+
+- 实际效果：cleaned.csv、field_issues.csv、quality_report.md、duplicates.csv、transform_log.csv、evidence_table.json；
+- 结果正确性：rules 带 locator；报告数字机器反算；单位可逆；重复主键可回溯；
+- 可核验性：sources.sha256、run.log、原值→新值、locator；
+- 使用增益：单命令、确定性、无人工干预、报告与表一致；
+- 创新增益：字段级规则推断、跨表主键对齐、可逆单位映射、一致性自检；
+- 可靠体验：纯标准库、离线、退出 0、空表/乱码/单位不明枚举处理；
+- 生态贡献：SKILL.md、references/skill_guide.md、quality_report_template.md、cleaning_rules.json；如需补充环境声明，写入 environment/resources.yaml 并在 SKILL.md 说明。
+
+## 8. 限制
+
+- 不做统计建模、假设检验、图表美化；如 task 要求统计图表，仅做描述性统计或直接基于清洗后数据运行题面指定代码，并注明假设；
+- 不推断总体统计量，不填补无效源值；
+- 脚本只稳定处理文本表；PDF/DOCX 等须先解析；
+- 对主观判断保留参考答案区间与不确定性，不强行单一值；
+- 不生成预训练答案、正式测试案例、白板或 benchmark 分数。
+
+## 9. 最小调用示例
+
+    mkdir -p /app/work /app/output
+    python3 /skills/weekly-skill/scripts/main.py run \
+      --input /input \
+      --output /app/output \
+      --work /app/work
+
+说明：示例仅为接口调用，不包含任何正式案例答案。若平台安装路径不同，以实际 /skills/weekly-skill 路径为准。

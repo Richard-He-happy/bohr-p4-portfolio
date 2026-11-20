@@ -1,269 +1,258 @@
 ---
 name: cross-lingual-known-item-search
 description: >-
-  Cross-lingual literature retrieval skill for academic known-item search. Builds a concept table, plans one query per target language, retrieves over the case-supplied corpus, identifies language/version/attribution, merges duplicate language versions, and aligns every candidate to verbatim source evidence. Use when the question language and paper body language differ, or when language/version attribution must be auditable. Offline, standard library only.
-version: 1.1.0
+  Cross-lingual known-item literature retrieval skill. Runs one-command full pipeline to inventory sources, parse multilingual materials, build term tables, generate per-language queries, retrieve candidates, align verbatim evidence, detect language/version, deduplicate translations, and emit auditable result.json plus editable artifacts. Use when research question language and paper body language may differ or when source/DOI/version/body-language attribution must be preserved. Offline; Python standard library only.
+version: 2.0.0
 license: MIT
 ---
 
-# 跨语言已知条目文献检索 Skill（Harness Agent 执行版）
+# 跨语言文献检索 Skill（Harness Agent 执行版）
 
-## 0. 致 Harness Agent：最终交付物必须由你亲自完成
+## 0. 执行优先级
 
-本 Skill 自带的 `scripts/main.py` 与 `scripts/engine.py` 只是工具，用于生成基线、解析文本类材料、执行检索与字段校验。**脚本产出的初步 JSON/CSV 不能原样当作最终成品提交。**
+本 Skill 的目标是在固定 hidden cases 上完成可复核的跨语言已知条目检索。最高优先级：
 
-你必须作为 Harness Agent 亲自完成以下事项：
+1. 先跑确定性脚本入口，产出完整基线。
+2. Agent 再真实读取 `/input` 原文并核验，不依据文件名或领域标签补造。
+3. 每一条候选命中都必须有逐字 quote、来源编号 `[S#]`、定位符 `文件#行号/段落号` 或 `文件#page.line`。
+4. 材料缺失、语言不确定、解析失败、版本冲突等全部诚实登记；任何情况下最终退出码为 0。
 
-1. 读取 `/input/case.json`、`/input/task.md` 以及所有原始材料，理解研究问题、目标语种、已知条目与证据边界。
-2. 使用真实解析工具读取 PDF/DOCX/CSV/图片等材料内容，不得只依据文件名或领域标签猜测与补造。
-3. 在脚本基线之上，亲自核对关键候选的标题、DOI、语种、版本、术语命中与证据摘录是否真实、一致、可溯源。
-4. 亲自回填并修正 `result.json`，保留所有 `output_contract` 字段，不得删除、清空或遗漏基线字段。若不确定，保留原值并标注 `reviewed_by_agent`、`pending_human` 或 `conflicts`。
-5. 任何不确定、缺失、冲突或失败都必须如实写入 `status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes` 与 `runtime`。
+## 1. 单命令全流程入口
 
-题目原题评分强调“完整交付”与“真实推导”。只运行脚本、不读材料、不亲自核对证据，会被判定为不完整或非真实推导。
+从 Skill 根目录运行：
 
-## 1. 用途与边界
+`python3 scripts/main.py run --input /input --output /app/output --work /app/work`
 
-面向科研文献检索场景，完成跨语言文献检索与筛选，并输出可追溯的候选集、排序/筛选依据、术语对齐依据、版本/语言归属与遗漏说明。
+该命令内部按 `init -> build -> selfcheck` 执行：
 
-适用条件：
+- `init`：盘点 `/input` 全部材料；生成来源台账；分配 `[S#]`；抽取候选；对同一 work 的多语言/多版本/重复视图做冲突分组；生成 `/app/work/ledger.json`。
+- `build`：校验候选；无 Agent draft 时执行确定性兜底抽取；生成候选集、查询日志、术语表、证据表、去重结果、正文交付物与最终 `result.json`。
+- `selfcheck`：检查产物与输出契约一致性；把检查结果写入 `verification.json`；发现错误必须修复或诚实降级，不伪造通过。
 
-- 问题用一种语言提出，但相关论文可能以另一种语言写作或被翻译为另一种语言。
-- 需要审计式记录每个命中项的语种、版本（原文、译文、双语刊）、来源文件、术语命中的原文表面形式、证据摘录与定位符。
-- 题面固定案例为 3 个双向跨语言 known-item 研究问题，涉及真实 3 篇作品/6 视图（原文葡萄牙语/英语、出版社全文翻译、英语摘要等场景）。源文件、DOI、版本、正文语言与归属必须保留为一等证据。
+若脚本版本没有 `run` 子命令，回退为：
 
-不适用/不可宣称：
+`python3 scripts/main.py --input /input --out /app/output`
 
-- 不进行整篇翻译、写作润色或未经授权的跨境实时抓取。
-- 不声称实时覆盖、未见语言或新研究声称；只处理 case 实际提供的材料。
-- 材料不足时不补造文献、数据、引用、分数或评分。
+随后必须执行本文件第 9 节的自检，确保 `result.json` 合法、契约齐全、退出码 0。
 
-## 2. 运行时契约与目录
+## 2. 目录约定
 
-### 2.1 目录
+- `/input`：只读。读取 `case.json`、`task.md` 与全部实际材料。PDF 必须真实解析，不能依赖预抽取答案或标签假设。
+- `/app/work`：工作中转。解析文本、台账、draft、中间 JSON 放这里。
+- `/app/output`：最终产物。必须包含合法 `result.json` 及题面要求的其他可复核文件。
+- `/skills/weekly-skill`：Skill 包根目录。脚本与资源用包内相对路径：`scripts/main.py`、`scripts/engine.py`、`references/method.md`、`references/io_schema.md`、`references/glossary.tsv`。
 
-- `/input`：只读输入。包含 `case.json`、`task.md`、以及题面规定的材料（PDF/DOCX/CSV/图片等）。
-- `/app/work`：工作目录。用于保存解析文本、中间语料、临时文件、脚本输出。
-- `/app/output`：最终产物目录。必须包含合法的 `result.json`，以及所有题面要求的可编辑/可复核文件。
+## 3. 输入契约与产出契约
 
-### 2.2 入口与脚本调用
+### 3.1 输入
 
-标准入口：
+每个 case 至少有：
 
-```bash
-python3 scripts/main.py --input /input --out /app/output
-```
+- `/input/case.json`：`case_id`、研究问题、范围约束、已知条目、目标语种、`output_contract`。
+- `/input/task.md`：任务说明、评分维度、运行时约束。
+- `/input` 下其他材料：JSON/CSV/TSV/PDF/DOCX/XLSX/PNG/JPG 等，可能有实际论文原文、译文、摘要页、元数据表。
 
-也可调用：
+若 `case.json` 不存在或不可解析：
 
-```bash
-python3 scripts/main.py --help
-python3 scripts/engine.py --help
-```
+1. 递归查找 `/input` 第一个 `case*.json`。
+2. 仍无则产出最小合法 `result.json`：`status=input_error`、`case_id=null`、`output_contract` 为可用空对象或数组，写入 `errors[]`，退出 0。
 
-脚本只使用 Python 标准库、无网络、无额外依赖。脚本本身不消耗模型请求。
+### 3.2 `result.json` 双回显
 
-### 2.3 产物要求
+最终 `result.json` 必须同时存在：
 
-- `result.json` 必须存在且合法。
-- `result.json` 必须包含 `case_id`。
-- `result.json` 必须包含原 `output_contract` 中出现的**全部字段**，键名不改、原样保留；缺失值用 `null` 或 `[]`。
-- 可编辑 Office/幻灯片/图形产物必须额外提供真实渲染的 PDF/PNG 预览，预览写入 `/app/output`。
-- 保留基线产物：`candidates.csv`、`candidates.json`、`query_log.json`、`term_table.json`、`verification.json` 等。
-- 任何情况退出码保持 0。
+- 顶层契约字段：`case_id`、`status`、`question`、`scope`、`candidates`、`evidence_table`、`queries`、`term_table`、`coverage`、`dedup`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`verification`。
+- `output_contract`：嵌套对象，也必须包含 `case_id` 与题面要求的全部字段。
 
-## 3. 输入盘点流程
+如果题面 `output_contract` 缺失或不明确，以 `/input/case.json` 实际存在的键为准；若仍无，则使用本文件第 3.2 节标准字段，并在 `sources.note` 说明。
 
-按以下顺序盘点 `/input`：
+## 4. Agent-first 双路径
 
-1. 读取 `/input/case.json`。
-   - 若不存在，递归查找第一个 `case*.json`。
-   - 若仍不存在，必须在 `status` 标为 `input_error`，产出最小合法 `result.json`，退出码 0。
-2. 读取 `/input/task.md`。
-   - 若存在，用于补充问题、约束、输出契约与评分说明。
-3. 列出 `/input` 下所有文件与目录。
-4. 对每个 JSON/JSONL/CSV/TSV 文件按内容解码：
-   - 任何含 title-like 键 + 至少一个 bibliographic 键的对象视为一条文献记录，无论文件叫什么。
-   - 标题/摘要/DOI/语言/年份/期刊/作者等别名见 `references/io_schema.md` §2。
-5. 对 PDF/DOCX/XLSX/PNG/JPG 等材料：
-   - **必须尝试真实解析**，提取文本、表格或 OCR 文本。
-   - JSON/CSV/TSV 可直接用脚本解析；PDF/DOCX/图片应优先调用平台提供的 `pdf-text-tool`、`pdftotext`、`python-docx` 等工具。
-   - 将解析结果保存为 `/app/work/parsed/` 下的结构化 JSONL/JSON/CSV 文件，保留源文件路径与页/行定位。
-   - 不得因为扩展名不是 JSON/CSV 就跳过材料。
-6. 如果材料损坏、格式不支持或解析失败：
-   - 记录到 `errors[]` 与 `degradations[]`。
-   - 将该材料的可用部分保留为 `pending_human`。
-   - 不得将未解析内容当作证据，不得补造其中元数据。
+### 4.1 路径 A：Agent 详细核验
 
-## 4. 完整执行流程（按顺序）
+预算允许时：
 
-### 步骤 4.1：盘点输入
+1. 先运行 `init`，查看 `/app/work/ledger.json`。
+2. Agent 真实读取原文和译文，核对标题、DOI、语言、版本、术语命中、quote 和 locator。
+3. 将判断写入 `/app/work/draft.json`。
+4. 再运行 `check -> build`。
+5. 将 Agent 补充或纠正写入 `agent_review.json` 和 `changes[]`。
 
-**输入**：`/input` 目录。
+`/app/work/draft.json` 最小形状：
 
-**动作**：列出全部文件；读取 `case.json` 与 `task.md`；识别 `output_contract`、`case_id`、问题文本、范围约束、已知条目/引用、目标语种、评价要求。
+- `case_id`：与输入一致。
+- `source_inventory[]`：每项含 `source_id`、`file`、`kind`、`parse_status`、`notes`。
+- `work_identity[]`：每项含 `work_id`、`canonical_title`、`canonical_doi`、`language_views[]`。
+- `term_mapping[]`：含 `term_id`、`query_term`、`target_lang`、`normalized_text`、`mapping_type`、`confidence`、`basis`。
+- `candidate_judgments[]`：含 `candidate_id`、`true_title`、`true_doi`、`body_language`、`version_label`、`matches`、`quote`、`locator`、`notes`。
+- `unresolved[]`：待人工或保留不确定。
 
-**输出**：输入清单；问题/约束/契约摘要。
+### 4.2 路径 B：无 draft 时确定性兜底
 
-**失败分支**：若 `case.json` 缺失或不可解析，进入降级模式（见第 6 节）。
+若 `/app/work/draft.json` 不存在：
 
-### 步骤 4.2：真实解析材料
+- `build` 使用台账确定性抽取，逐字生成 quote 和 locator，生成与路径 A 完全同构的产物。
+- 必须在 `gaps[]`/`degradations[]` 记录 `AUTO_EXTRACT`：说明本候选为脚本自动抽取，未经过 Agent 逐条复核。
+- 两条路径输出同一套产物、同一份 `result.json` 契约，不因路径不同缺字段。
 
-**输入**：`/input` 下的所有材料。
+## 5. 完整执行阶段
 
-**动作**：
+### 阶段 1：盘点和来源编号
 
-- 对文本类材料用 `scripts/main.py` 或 `scripts/engine.py` 解析。
-- 对 PDF/DOCX/图片等使用平台解析工具提取正文与元数据。
-- 将提取结果保存到 `/app/work/parsed/`，每条记录至少包含：`title`、`abstract`、`doi`、`year`、`venue`、`authors`、`language`、`body_language`、`version_label`、`source_file`、`locator`。未知项为 `null`。
-- 若同一文献存在多语言版本/多视图，保留各视图记录，但 `source_file` 与 `locator` 必须真实指向对应文件。
+对 `/input` 下每个文件：
 
-**输出**：`/app/work/parsed/` 下的结构化语料；材料来源清单。
+1. 列出全部文件，记录路径、类型、大小、编码。
+2. 读取 `case.json` 与 `task.md`。
+3. 为每份可识别材料分配 `[S#]`。
+4. 建立来源台账：`source_id`、`file`、`kind`、`parse_status`、`language_hint`、`encoding`。
+5. 如果某文件解析失败，不得跳过；写入 `errors[]` 和 `degradations[]`，并在 `pending_human[]` 保留条目。
 
-**失败分支**：某文件解析失败时，保留文件清单，写入 `errors`/`degradations`，不阻断其他材料。
+### 阶段 2：真实解析
 
-### 步骤 4.3：构建/核对证据语料
+- JSON/CSV/TSV：用 `scripts/engine.py` 解析。
+- PDF/DOCX/图片：调用平台解析工具或 `scripts/engine.py` 中可用能力，提取实际正文和元数据。
+- 解析结果写入 `/app/work/parsed/`，每条至少含：
+  `title`、`abstract`、`doi`、`year`、`venue`、`authors`、`language`、`body_language`、`version_label`、`source_file`、`locator`。
+- 未知项置 `null`，不得猜填。
 
-**输入**：步骤 4.2 的解析结果；`references/glossary.tsv`；`case.json` 已知条目信息。
+### 阶段 3：术语表构建
 
-**动作**：
+从研究问题、题面约束和 `/input/case.json` 构建术语表：
 
-- 确认解析语料覆盖 case 所声明的所有材料；若缺失，记录 `coverage.gaps[]`。
-- 对每个候选记录建立证据定位：`source_file`、`page/line`、JSON pointer 或 row index、field、句子/字符偏移。
-- 核对术语表是否覆盖研究问题中的关键概念；缺失时从材料原文中提取并补充到 `term_table[]`，方法标为 `agent_supplied_from_source`。
-- 不得根据文件名推断语言、DOI、标题或领域标签；必须依据文件内容。
+- 每个术语记录：`term_id`、`query_term`、`target_lang`、`normalized_text`、`mapping_type`、`confidence`、`basis`。
+- `mapping_type` 可取值：`exact`、`synonym`、`abbreviation`、`hypernym`、`hyponym`、`transliteration`、`local_name`、`agent_supplied_from_source`。
+- 优先使用 `references/glossary.tsv`；若材料原文出现词表未覆盖的关键词，从原文真实提取并补充，方法标 `agent_supplied_from_source`。
+- 术语无对应译法时写入 `missing_concepts[]`，查询状态标 `no_term_mapping`，不静默丢弃。
 
-**输出**：可用于检索的结构化记录集合；术语表与证据定位草案。
+### 阶段 4：逐语种查询与检索
 
-**失败分支**：无可用语料时进入 `insufficient_evidence` 模式，但仍产出合法 `result.json`。
+为每个目标语言生成查询：
 
-### 步骤 4.4：生成基线产物
+- 查询记录写入 `queries[]` 和 `query_log.json`。
+- 每条查询含：`query_id`、`lang`、`query_type`、`expressions[]`、`matched_count`、`status`、`notes`。
+- 查询在本 case 提供的材料语料内执行，不得声称实时联网或未见语言覆盖。
+- 若某声明语言无有效结果，必须在 `coverage.languages_without_results[]` 说明，不得假装覆盖。
 
-**输入**：已解析语料与 case 约束。
+### 阶段 5：候选证据对齐
 
-**动作**：
+每个候选至少包含：
 
-- 运行：
+- `candidate_id`、`work_id`、`title`、`doi`、`year`、`authors`、`venue`。
+- `source_id`：对应 `[S#]`。
+- `locator`：`文件#行号/段落号` 或 `文件#page.line`。
+- `quote`：必须逐字来自原文；不得改写。
+- `matched_terms[]`：候命中命中的原文表面形式。
+- `relevance_reason`：为什么相关。
+- `strength`：`high`、`medium`、`low`、`unverified`。
+- `support_scope`：`direct_evidence`、`indirect_evidence`、`metadata_only`、`unverified`。
+- `language`、`body_language`、`version_label`、`version_basis`。
+- `duplicate_of`：若与其他候选同 work，指向主候选。
 
-```bash
-python3 scripts/main.py --input /input --out /app/output
-```
+### 阶段 6：语言与版本识别
 
-- 该脚本会生成全套基线：`result.json`、`candidates.csv`、`candidates.json`、`query_log.json`、`term_table.json`、`verification.json`。
-- 脚本自动完成概念表、语言识别、术语扩展、逐语种查询、检索、打分、排序、去重、版本标注、证据附加与审计。
-- 立即确认 `/app/output/result.json` 合法且包含 `output_contract` 全字段与 `case_id`。
+语言判断优先依据正文实际内容，而非文件名或单一元数据标签：
 
-**输出**：完整基线产物。
+- `language`：文献记录标注语言。
+- `body_language`：正文实际语言。
+- `version_label` 可取值：`original`、`publisher_full_translation`、`english_abstract_only`、`exact_duplicate`、`bilingual_publication`、`unknown`。
+- `version_basis`：说明判定依据，如 DOI 匹配、标题一致、摘要语言、页数、语种正文证据。
+- 若 `language` 与 `body_language` 冲突，写入 `conflicts[]` 和 `uncertainty[]`。
 
-**失败分支**：若脚本异常，使用 try/except 包裹；若失败，创建最小合法 `result.json`，复制 case.json 的 `case_id` 与 `output_contract` 每个键（值 `null` 或 `[]`），`status` 标为 `input_error` 或 `partial`，并写入 `errors`/`degradations`。
+### 阶段 7：去重与版本归并
 
-### 步骤 4.5：Agent 亲自审查与增强
+同一文献的多个语言版本/多个视图必须先归并再计数：
 
-**输入**：基线产物；`/app/work/parsed/`；原始材料。
+- 优先按 DOI 归并；无 DOI 时按规范化标题 + 年份 + 作者归并。
+- `dedup.rules` 记录去重规则。
+- 每个 work 只保留一个主候选，`view_records[]` 列出各组视图：原文、译文、摘要、重复记录。
+- `coverage.duplicates_merged` 写实际合并数，不得虚报。
 
-**动作**：
+### 阶段 8：漏检与误译复核
 
-- 阅读 `case.json` 与 `task.md`，确认研究问题、目标语言、已知条目。
-- 打开关键材料，优先检查：
-  - 非英语候选是否真实存在；
-  - 标题、DOI、作者、年份、期刊是否与材料一致；
-  - `language` / `version_label` / `version_basis` 是否正确；
-  - `matched_terms.surface` 是否与论文原文用词一致；
-  - `evidence_snippet` 是否逐字来自源文件；
-  - `evidence_locator` 是否能定位到原句。
-- 对脚本输出中的错误或遗漏亲手修正；所有修正写入 `changes[]`。
-- 对无法确认的内容标为 `pending_human` 或 `uncertainty`，不要改写成看似确定。
-- 如脚本未生成某些题面要求文件，由你补做，但不得删除基线产物。
-- 可编辑 Office/幻灯片/图形产物如需生成，必须同时提供真实渲染的 PDF/PNG 预览。
+对高风险命中或词面匹配但语义存疑的候选：
 
-**输出**：增强后的完整产物与审核记录。
+- 检查 `matched_terms.surface` 是否与原文用词一致。
+- 若只是词面对应但语义漂移，标记为假阳性并写入 `screening[]`，证据确凿才可排除。
+- 无结果、冲突、权限或接口异常分别写入 `status`、`errors[]`、`pending_human[]`。
 
-**失败分支**：若时间或请求预算不足，保留当前基线并更新 `status` 为 `partial`；不要丢弃任何已有合法字段。
+### 阶段 9：渲染与最终 result.json
 
-### 步骤 4.6：Rubric 自检
+生成并落盘：
 
-**输入**：增强后的 `/app/output` 全部产物。
+- `result.json`
+- `candidates.csv`
+- `candidates.json`
+- `query_log.json`
+- `term_table.json`
+- `evidence_table.json`
+- `verification.json`
+- `agent_review.json`
+- `pending_human.json`
+- `deliverable.md`
+- 题面额外要求的可编辑文件及真实 PDF/PNG 预览
 
-**动作**：逐项检查第 7 节对照表与第 8 节自检清单。
+将所有状态、来源、不确定性、变更记录写回 `result.json`。
 
-**输出**：自检记录，可写入 `verification.json` 或 `result.json` 的 `runtime`/`changes`。
+## 6. 状态与异常处理
 
-**失败分支**：发现缺失字段立即补齐；发现证据不匹配立即回退为 `partial`/`pending_human`，绝不伪造通过。
+`status` 取值：
 
-### 步骤 4.7：回填 result.json 并落盘最终产物
+- `ok`：无 gaps、无 unresolved、证据全部可核验。
+- `partial`：已有可用结果，但存在未决、低置信度或局部失败。
+- `insufficient_evidence`：材料不足以支持候选或结论。
+- `input_error`：输入缺失或不可解析。
 
-**输入**：自检通过的产物。
+异常处理表：
 
-**动作**：
+- `case.json` 缺失或不可解析：`input_error`，退出 0。
+- 材料缺失：`insufficient_evidence` 或 `partial`，写入 `gaps[]`。
+- PDF/DOCX/图片解析失败：`errors[]`/`degradations[]`，该材料写 `pending_human`。
+- 格式不支持：标 `unsupported`，`status=partial`。
+- 空输入/无候选：`insufficient_evidence`，保留空候选与查询日志。
+- 目标语种无结果：写入 `coverage.languages_without_results[]`，不删语种。
+- 术语无对应译文：写入 `missing_concepts[]`。
+- 语言置信度低于 0.6：标 `language_low_confidence`，至少 `partial`。
+- 证据摘录无法定位：`evidence_quote_match=failed`，写入 `pending_human`，不调整摘录以通过。
+- 版本冲突：保留冲突记录，写入 `conflicts[]`，不强行消解。
+- 超时或中断：保留最后合法 `result.json`，写入 `degradations[]`，退出 0。
 
-- 确保 `result.json` 包含原 `output_contract` 全部字段，键名不变。
-- 确保 `case_id` 与输入完全一致。
-- 确保 `status` 与所有记录的问题相符：无 `gaps`/`uncertainty` 且证据全部通过才可为 `ok`；有任一项未决则为 `partial`；证据不足为 `insufficient_evidence`；输入错误为 `input_error`。
-- 最终写回 `/app/output/result.json`，保留所有附加文件。
-- 退出码 0。
+## 7. Hidden case 鲁棒性
 
-## 5. 预算策略（64 次模型请求 / 900 秒 / 16384 tokens）
+题面固定 3 个 case，覆盖真实 3 works / 6 views，典型形态：
 
-模型请求预算非常有限，必须按优先级分配：
+- 原文葡萄牙语 / 英语 body。
+- 出版社全文翻译。
+- 英语摘要 only。
+- 完全重复记录。
 
-1. **必须先做**：
-   - 步骤 4.1 与 4.2 输入盘点和真实解析：约 4-8 次请求。
-   - 步骤 4.4 运行脚本：脚本执行不消耗模型请求，但需确认合法输出。
-   - 步骤 4.5 中抽取关键候选核查：约 10-16 次请求，优先非英语候选、版本/重复标注、证据摘录精确性。
-   - 步骤 4.6 与 4.7 自检与回填：约 4-8 次请求。
+处理原则：
 
-2. **可增量改进**：
-   - 术语表补充、查询日志核对、去重规则解释：约 6-10 次请求。
-   - 补做 Office/图形产物预览：如材料要求，约 4-6 次请求。
+1. 先识别 `case_id` 与问题语言，再检查材料实际正文语言。
+2. 不因某文件叫 `english_abstract` 就假设其正文语言；必须打开验证。
+3. 同一 work 的多个 views 必须合并，但每个 view 的 `source_id`、`locator`、`language`、`version_label` 必须保留。
+4. 若只找到摘要或译文，不声称找到原文；写清已完成和未完成部分。
+5. 若 DOI 或标题在不同文件中不一致，保留冲突，不以多数票掩盖。
 
-3. **可跳过**：
-   - 对低权重候选逐条复查。
-   - 反复重跑脚本。
-   - 高风险但低收益的全文翻译、逐引用核对。
-   - 不产生额外证据的格式美化。
+## 8. 预算策略
 
-4. **诚实 partial 落盘时机**：
-   - 步骤 4.4 完成后立即落盘基线 partial。
-   - 每完成一轮关键核查，更新一次 `result.json`。
-   - 若剩余预算不足 15%或时间不足 90 秒，停止新任务，保留当前 `result.json` 并退出 0。
+64 次模型请求 / 900 秒内：
 
-## 6. 隐藏案例鲁棒性与降级
+1. 先运行脚本产出全套基线，脚本执行不消耗模型请求。
+2. 再核查关键非英语候选、版本/重复标注、证据摘录精确性。
+3. 每完成一轮核查就更新一次 `result.json`。
+4. 剩余预算不足 15% 或时间不足 90 秒时停止新任务，保留合法 partial 并退出 0。
+5. 不反复重跑脚本，不逐条复查低权重候选，不做无证据的格式美化。
 
-任何情况下都要产出合法 `result.json`（退出码 0）。遇到以下情况按规则降级：
+## 9. 提交前自检
 
-| 触发条件 | 行为 |
-|---|---|
-| `case.json` 缺失或不可解析 | `status: input_error`，复制未知输出契约中每个键为 `null`/`[]`，写入 `errors`；退出 0 |
-| 材料缺失 | `coverage.gaps[]` 记录缺失项；`status: insufficient_evidence` 或 `partial`；不补造记录 |
-| PDF/DOCX/图片解析失败 | 写入 `errors[]`/`degradations[]`；该材料标 `pending_human`；不将其作为证据 |
-| 格式不支持 | 保留原始文件清单，标为 `unsupported`；`status: partial` |
-| 空输入/无候选 | `status: insufficient_evidence`；记录阈值、记录数、查询日志；候选为空 |
-| 超时/中断 | 保留最后合法 `result.json`；若有未完成步骤，在 `status`/`stage` 标为 `partial` 并写入 `degradations[]` |
-| 输出契约缺失或不明确 | 以 `case.json` 实际存在的 `output_contract` 键为准；若根本没有，使用本 Skill 标准字段 + `case_id`，并写入 `sources.note` |
-| 术语无对应译文 | 写入 `missing_concepts[]`；查询标记 `no_term_mapping`；不静默丢弃 |
-| 语言识别置信度低于 0.6 | 标为 `language_low_confidence`；`status` 至少为 `partial` |
-| 证据摘录无法定位 | `evidence_quote_match: failed`；写入 `pending_human`；`status: partial`；不调整摘录以通过检查 |
-| 数值/引用不在材料中 | 不报告该数值/引用；如 case 声称存在但材料缺失，记录冲突，不补造 |
+逐项核对：
 
-## 7. Rubric 维度 → 交付要求 → 自证方式
-
-| 评分维度 | 分值 | 交付要求 | 自证方式 |
-|---|---|---|---|
-| 实际效果：任务完成度 | 15 | 真实运行跨语言检索：从原问题确定目标语种、术语表、逐语种查询、取回结果并对齐到原文证据 | `queries[]` 中每个声明语言都有查询；`term_table[]` 每个变体有方法与权重；`query_log.json` 每条查询有命中与状态；无未解释空查询 |
-| 实际效果：结果正确性 | 15 | 命中文献真实存在；语种与版本标注正确；术语与原文用词一致；译文与原文同义 | 每个候选的 `doi`/`title`/`source_file` 在解析语料中存在；`language*`/`version*` 有 `language_evidence`/`version_basis`；`evidence_snippet` 逐字可查，`evidence_quote_match` 非 `failed` |
-| 实际效果：结果完整性 | 5 | 声明的语种都有有效结果；关键非英语文献覆盖；同一论文不同语言版本去重后计数 | `coverage.languages_with_results`、`coverage.non_source_language_works`、`coverage.duplicates_merged` 数字完整；每个工作只有一个候选，`view_records` 列出合并视图 |
-| 实际效果：结果可核验性 | 5 | 术语表、查询式、翻译服务与版本、语种判断依据可独立复核 | `term_table.json`、`query_log.json`、`sources[]`、`verification.json` 可供第三方逐个追溯 |
-| 使用增益：质量增益 | 15 | 相比基础 Agent 提升跨语言召回与术语对齐质量 | `gain_analysis.baseline` 与 `.skill` 明确对比，使用相同语料与阈值，说明提升点及限制 |
-| 使用增益：效率增益 | 5 | 减少翻译调用、无效语种查询、人工逐条核对工作量 | `gain_analysis` 中记录实际查询数、翻译调用数、人工核对项；说明由术语表/查询规划带来的减少 |
-| 使用增益：增益可验证性 | 5 | 通过公平对照证明质量或效率改善 | `gain_analysis` 引用固定 case 的原始记录，避免虚报；无对照时说明边界 |
-| 创新增益：新增能力 | 5 | 术语表驱动查询生成、语种识别与路由、译文与原文版本归并等能力 | `term_table[]`、`query_plan[]`、`dedup.rules`、`screening[]` 中体现新增能力 |
-| 创新增益：方法改进 | 5 | 术语扩展、翻译与回译校验、跨语言匹配、误译复核等措施有实质改进 | `term_expansion`、`screening[include reason]`、`uncertainty[]` 中记录方法改进与结果 |
-| 创新增益：创新证据 | 5 | 证明创新点相对已有方案边界和价值 | 在 `result.json` 内 `runtime`/`changes` 或补充说明中给出边界与价值；不虚构基准 |
-| 可靠体验：调用与易用性 | 3 | Agent 能正确触发和调用，用户能说清源语言、目标语种、术语要求并完成检索 | 本 SKILL 头部说明用途/触发条件/输入输出；`question` 字段记录语言推断与依据 |
-| 可靠体验：运行稳定性 | 4 | 不同语种、来源、重复运行下能持续产出可用结果 | 脚本标准库、确定性算法；同一输入重复运行结果一致；`runtime` 记录重跑次数与一致状态 |
-| 可靠体验：异常处理 | 3 | 对术语无对应译法、语种不确定、翻译失败、原文不可得、版本冲突等有处置能力 | 第 6 节降级表与 `pending_human[]`、`errors[]`、`degradations[]` 对应 |
-| 生态贡献：文档完整性 | 3 | 使用说明、术语表来源与许可、语种清单、依赖、示例、范围、限制维护信息齐全 | 本 SKILL、`references/method.md`、`references/io_schema.md`、`references/glossary.tsv` 均可读且一致 |
-| 生态贡献：资源可复用性 | 4 | Skill 本体、脚本、术语表、多语种查询模板、题集和去重规则可复用 | 文件路径均为包内相对路径；`scripts/engine.py` 与 `main.py` 可独立调用；`glossary.tsv` 与 `method.md` 可被复用 |
-| 生态贡献：分享推广价值 | 3 | 沉淀可分享跨语种案例、术语表、评测题和实践经验 | 不提交预生成答案，但保留示例与透明记录；GitHub 链接按要求填写 |
-
-## 8. 提交前自
+- `result.json` 合法且 `case_id` 与输入完全一致。
+- 顶层与 `output_contract` 中均出现契约字段，键名不变，缺失值为 `null` 或 `[]`。
+- `status` 与 gaps/uncertainty/errors 完全一致。
+- 每条候选有 `source_id`、`locator`、`quote`，且 quote 逐字可溯源。
+- 每个声明语言都有查询和结果，或明确缺口说明。
+- 重复版本已合并，`duplicates_merged` 可复核。
+- `queries[]`、`term_table[]`、`sources[]`、`verification.json` 可供第三方追溯。
+- 不包含虚构基准分数、金标准、预生成答案或不存在的数据。
+- 无论任何异常，最终退出码 0。

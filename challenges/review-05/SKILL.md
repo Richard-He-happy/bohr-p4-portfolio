@@ -1,223 +1,301 @@
 ---
 name: academic-compliance-review
-description: 对论文/科研材料做学术规范与合规审查，输出带逐字定位证据的结构化审查意见。用于审稿、投稿前自查，以及学术诚信、引用、隐私、版权、伦理、投稿要求的合规检查；产出 result.json + review_report.md + issues.csv，覆盖事实核验、引用支持、方法设计、统计报告、论证链、学术规范六个检查面。版本 2.0：增加 Agent 亲自推导、完整性优先、预算感知、隐藏案例鲁棒性。
-version: 2.0.0
+description: 对论文/科研材料做学术规范与合规检查，输出逐条带原文定位、逐字引用、依据、严重度与修改建议的结构化审查报告。用于审稿、投稿前自查，以及学术诚信、引用、隐私、版权、伦理、投稿要求的合规审查；产出 result.json + review_report.md + issues.csv。Agent 先读原文并写 draft.json，脚本提供确定性兜底抽取与契约回填；所有产物可复核、可复跑。
+version: 3.0.0
 ---
 
-# 学术规范与合规检查（review-05）
+# 学术规范与合规检查 Skill
 
-## 0. 最高优先级：脚本只是工具，最终交付物由你（Harness Agent）亲自读材料、推导、撰写/制作
+## 0. 最高优先级：交付可复核的审查结论
 
-`scripts/main.py` 与 `scripts/extract.py` 只负责解析材料、建立可定位语料、生成确定性候选、校验 quote、回填契约和渲染报告。它们产出的 candidates、packets、partial result 都不是最终成品，**不得把脚本骨架、模板或未裁定候选直接当成品提交**。
+你要完成的是“学术规范与合规审查”，不是泛泛提醒。每个问题必须能回指原文具体位置，并给出可独立核对的依据。评分最高权重是实际效果 40 分与使用增益 25 分，因此：
 
-你必须完成以下“亲自推导”动作：
-
-1. 真实读取 `/input` 下每个材料，不得仅凭文件名或领域标签猜测内容。
-2. 逐条阅读 `/app/work/review/packets.md` 与 `/app/work/review/candidates.json`，回到原文 `locator` 处核对每个候选是否成立。
-3. 每条进入 `issues` 的问题由你亲自确认：`quote` 必须逐字来自原文，`reason`/`suggestion` 必须结合具体材料写出，不得复制脚本触发条件。
-4. 脚本候选不足或漏报时，由你亲自补报；脚本误报的候选必须写 `dismissed` 并给理由。
-5. 完整性优先：先运行脚本得到全套基线交付物，之后只能增量增强，**不得删除、清空或遗漏任何基线产物、`output_contract` 字段或 `result.json` 键**。
-
----
-
-## 1. 用途与边界
-
-**做什么**：读入科研材料，按六个检查面逐条给出**可定位、可核对**的问题（原文 locator + 逐字 quote + 判定依据 + 严重度 + 可执行建议），并如实区分“错误 / 证据不足 / 规范问题 / 建议”。
-
-六个检查面：
-
-- 事实核验
-- 引用支持
-- 方法设计
-- 统计报告
-- 论证链
-- 学术规范（诚信、隐私、版权、伦理、投稿要求）
-
-**不做什么**：不代写、不润色、不代投稿；不重做数据分析；不出具法务或伦理委员会的正式意见；不判断文献“是否真实存在”（离线无法核验 → 记 `insufficient_evidence` 并 `pending_human`）。
-
-**适用**：期刊稿件、结题/答辩材料、对外发布前自查；中英文；PDF/DOCX/MD/TXT/JSON/CSV/XLSX。
-**不适用**：纯图片或扫描件（本 Skill 无 OCR 能力）、需要跨库查重或 DOI 核验、需伦理委员会裁定的争议。
+1. **禁止无依据结论**：不得凭文件名、领域标签、写作风格判断违规；不得编造参考文献、期刊指南、伦理批件、数据许可或统计结果。
+2. **禁止只报泛化问题**：每条 `issues[]` 必须包含 `quote`、`locator`、`severity`、`verdict_type`、`reason`、`suggestion`、`evidence`。
+3. **禁止偏科漏项**：必须覆盖材料中实际存在的风险面，六面检查逐面给状态；有证据不足就标 `insufficient_evidence`，有缺失就进 `pending_human` 或 `missing_materials`。
+4. **禁止破坏基线产物**：脚本生成的基线候选、契约字段、来源台账不得删除。Agent 只能增量增强、核验、补漏或标记误报。
+5. **诚实降级**：材料无法解析、PDF 无文本层、目标期刊指南缺失、文献无法离线核验时，必须写入 `errors`/`degradations`/`pending_human`，不得补齐成“通过”。
 
 ---
 
-## 2. 运行契约
+## 1. 单命令入口与运行策略
 
-- 输入 `/input`（`case.json` + `task.md` + 材料），工作目录 `/app/work`，产物 `/app/output`。
-- 仅 Python 标准库（≥3.9），**不联网**，不依赖当前工作目录（脚本用 `Path(__file__).resolve().parent` 定位同目录模块）。
-- **退出码恒 0**；任何异常都落成合法 `result.json`。
-- 先写 partial（`status=partial`）再细化，最终无条件覆盖为终态。
-- 预算：本地计算毫秒级；判读阶段建议 ≤64 次模型请求、900 秒，单次响应 ≤16384 tokens；接近上限先落盘 honest partial，再增量改进。
+### 1.1 主命令（优先使用）
 
 ```bash
-python3 scripts/main.py --input /input --output /app/output --stage scaffold   # 出候选 + partial
-python3 scripts/main.py --input /input --output /app/output --stage finalize   # 校验、去重、契约回填、渲染
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
 ```
 
-**你不可直接以 `finalize` 默认输出为最终答案。** 正确顺序是：scaffold → 你亲自裁定候选并补漏 → 再 finalize 校验。若 finalize 产物缺少你的裁定，应视为 partial，继续补全。
+该命令内部完成：
+
+- **init**：盘点 `/input` 全部材料，建立来源编号 `S1..Sn`，抽取候选，按六面分组；
+- **build**：校验 quote/locator，按 `draft.json` 或确定性兜底生成 issues、checks、report、CSV、result.json；
+- **selfcheck**：检查 quote 是否逐字命中、契约字段是否双回显、CSV 与 JSON 是否一致、所有产物是否存在。
+
+### 1.2 兼容旧版命令
+
+若 `run` 子命令不可用，使用：
+
+```bash
+python3 scripts/main.py --input /input --output /app/output --stage scaffold
+# 完成人工裁定并写入 /app/work/draft.json 后：
+python3 scripts/main.py --input /input --output /app/output --stage finalize
+```
+
+无论哪条路径，都必须先落 partial，最终退出码必须为 0，任何异常也必须有合法 `result.json`。
 
 ---
 
-## 3. 输入发现与真实解析
+## 2. 输入发现与契约解析
 
-1. 递归扫描 `/input` 下全部文件（按名排序，上限 50；超出记 `degradations:file_cap`）。
-2. `case.json`（或首个 `case*.json`）：原样保留 `case_id`；递归定位 `output_contract`（键名可为 `output_contract`/`contract`/`result_contract`）。
-3. 材料按**扩展名 + 内容**解析，禁止用文件名判断内容：
-   - PDF：用环境提供的 `pdf-text-tool` 或 `scripts/extract.py` 提取文本层；若无文本层，记为 `pdf_no_text_layer`。
+1. 递归扫描 `/input`，文件按名排序，最多 50 个；超出记 `degradations:file_cap`。
+2. 读取 `case.json`，必须保留原始 `case_id`；递归查找 `output_contract`、`contract`、`result_contract` 任意键名。
+3. 所有材料按**扩展名 + 实际内容**解析，不按文件名猜测：
+   - PDF：使用环境提供的 `pdf-text-tool` 或 `scripts/extract.py` 提取文本；无文本层记 `pdf_no_text_layer`，该来源标 `unreadable`。
    - DOCX：读 `word/document.xml`。
    - XLSX：读 `sharedStrings` + `sheet*.xml`。
-   - 文本类：直接读取 UTF-8。
-   - 图片：只登记 `image_not_read`，**不读取像素、不做图内推断**。
-4. `case.json` 中 ≥60 字符的字符串按 JSON Pointer 建为独立来源，因为稿件可能直接内联。
-5. `/app/work/review/text/*.txt` 可视为“自行 OCR/转写”的补充文本，支持 `[[p3]]` 分页。
-6. 材料未提供的对象（文献表、图、补充材料、伦理附件）**明确列缺口，不构造**。
-
-**真实解析要求**：所有引用、数字、统计量、伦理表述、版权表述、投稿要求都必须来自实际提取文本或材料原文；无法提取的内容只可写“材料未提供/无法判断”，不得补造。
+   - 文本类：直接按 UTF-8 读取。
+   - 图片：只登记 `image_not_read`，不读取像素、不做图内推断。
+4. `case.json` 中 ≥60 字符的字符串按 JSON Pointer 建为独立来源。
+5. `/app/work/review/text/*.txt` 若存在，可作为转写补充文本，支持 `[[p3]]` 分页标记。
+6. 材料未提供的对象（文献表、图、补充材料、伦理附件、期刊指南）必须列缺口，不构造。
 
 ---
 
-## 4. 输出契约
+## 3. Agent-first 双路径工作流
 
-| 文件 | 作用 |
+### 3.1 Agent 路径（有 draft）
+
+1. 先运行主命令或 init，查看 `/app/work/review/packets.md` 与 `/app/work/review/candidates.json`。
+2. 真实阅读 `/input` 全部原文材料，逐条核对候选中的 `quote`、`locator`、数字、统计量、引用、伦理/版权/投稿表述。
+3. 将你的独立判断写入 `/app/work/draft.json`，每条问题可四选一：
+   - **成立** → 进入 `issues`；
+   - **证据不足** → 进入 `issues` 且 `verdict_type=insufficient_evidence`，同时进 `pending_human`；
+   - **误报/风格差异** → 进入 `rejected_candidates`，写理由；
+   - **脚本漏报** → 亲自追加 issue。
+4. 写完后再次运行主命令，让 build 使用 draft 生成最终产物。
+
+### 3.2 无 draft 时确定性兜底
+
+如果 `/app/work/draft.json` 不存在，脚本必须仍生成实质工作稿：
+
+- 抽取逐字 `quote` 与 `locator`；
+- 生成六面候选 issues；
+- 在 `review_records` 中写 `AUTO_EXTRACT: true`；
+- 在 `degradations` 中写 `auto_extract_baseline`；
+- 每条自动抽取的问题仍遵守 issue 字段契约，不得用模板句替代 reason/suggestion。
+
+Agent 的目标是把自动基线升级为人工裁定，但不能删除自动基线，除非已用更高质量 draft 覆盖。
+
+---
+
+## 4. draft.json 形状
+
+`/app/work/draft.json` 建议结构：
+
+```json
+{
+  "case_id": "原始 case_id",
+  "sources": [],
+  "issues": [],
+  "face_status": {},
+  "pending_human": [],
+  "rejected_candidates": [],
+  "missing_materials": [],
+  "assumptions": []
+}
+```
+
+每个 issue 至少包含：
+
+- `id`
+- `check_face`
+- `verdict_type`
+- `severity`
+- `locator`
+- `quote`
+- `basis`
+- `reason`
+- `suggestion`
+- `evidence`
+- `confidence`
+- `pending_human`
+
+---
+
+## 5. 六面检查清单
+
+必须逐面输出状态：`pass`、`issues_found`、`incomplete`、`not_applicable` 之一。
+
+1. **学术诚信**：数据与图像复用、重复发表、不当署名、利益冲突声明、致谢与基金一致性。
+2. **引用规范**：引文是否真实可核、元数据是否一致、正文论断与引文是否对应、引而不证、张冠李戴、格式不统一。
+3. **隐私与数据合规**：可识别个人信息、受限数据、未公开数据，是否具备授权/伦理审批依据、脱敏建议。
+4. **版权与许可**：图片、表格、代码、数据集等第三方材料来源标注、许可类型、复用条件。
+5. **伦理审查**：人的研究知情同意、伦理批件编号与适用范围，动物实验规范，风险/获益表述。
+6. **投稿要求**：将目标期刊/会议指南拆成可核对条目，逐条映射到稿件，报告缺失、超限、格式冲突，注明指南版本与日期。
+
+离线无法验证文献是否存在、DOI 是否有效、批件真假时，统一标为：
+
+- `verdict_type = insufficient_evidence`
+- 进入 `pending_human`
+- 不判成“事实错误”。
+
+---
+
+## 6. 问题分类与严重度
+
+### 6.1 类型
+
+- `factual_error`：可被原文或可核验依据证伪的事实错误。
+- `insufficient_evidence`：原文依据不足、离线无法确认、需人工复核。
+- `compliance_issue`：事实层面可能成立，但违反引用、隐私、版权、伦理或投稿规范。
+- `suggestion`：风格、清晰度、结构、低风险改进建议，不得写成学术不端。
+
+### 6.2 严重度
+
+- `critical`：影响结论可信性、存在伦理/版权/隐私重大风险；
+- `major`：影响审查通过或需作者必须处理；
+- `minor`：局部规范问题；
+- `suggestion`：改进建议。
+
+### 6.3 locator 格式
+
+使用 `S#|file#L行号|para段落号`，例如：
+
+```text
+S2|main.pdf#L142|para3
+```
+
+若来源是内联 JSON 文本，可用：
+
+```text
+S5|case.json#/materials/0/text|para2
+```
+
+---
+
+## 7. 结果产物与 result.json 契约
+
+### 7.1 必须交付
+
+| 文件 | 说明 |
 |---|---|
-| `/app/output/result.json` | 主结果：`case_id`、`status`、`issues[]`、`checks{}`、`summary`、`sources`、`uncertainty`、`pending_human`、`review_records`、`errors`、`degradations`、`changes`、`artifacts`、`runtime`、`contract_fields` + **`output_contract` 的每个键** |
-| `/app/output/review_report.md` | 人读报告：六面覆盖 + 逐条问题（位置/原文/依据/理由/建议）+ 待复核/拒收 + 不确定性 + 材料与运行 |
-| `/app/output/issues.csv` | 同一批问题的表格视图，可直接排序、批注、交办 |
-| `/app/work/review/packets.md` | 按六面分组的**候选**证据包（判读入口） |
-| `/app/work/review/candidates.json` | 候选机读版（`cid`/`trigger`/`sev_hint`/`safe`） |
+| `/app/output/result.json` | 主结果，契约双回显 |
+| `/app/output/review_report.md` | 人读报告，六面覆盖、逐条问题、待复核/拒收、材料与运行说明 |
+| `/app/output/issues.csv` | 与 `issues[]` 行一致，可排序、批注、交办 |
+| `/app/work/review/packets.md` | 六面候选证据包 |
+| `/app/work/review/candidates.json` | 机读候选 |
+| `/app/work/draft.json` | Agent 判断稿，若存在 |
 
-契约回填见 `references/schema.md` §5：键名从不改写，无对应值的键置 `null` 并记入 `contract_fields.unfilled`。
+### 7.2 result.json 双回显
 
-**可编辑 Office/幻灯片/图形产物预览**：本 Skill 原生输出为 JSON/MD/CSV，通常不需要渲染。若 `output_contract` 或题面额外要求可编辑 Office/幻灯片/图形产物，你必须同时产生**真实渲染的 PDF/PNG 预览**。若环境没有可用的渲染工具，要在 `result.json.degradations` 写入 `preview_missing`，并保持 `status` 为非 `pass`；不得伪造预览。
+`result.json` 必须同时包含：
 
----
+1. 顶层字段：
+   - `case_id`
+   - `status`
+   - `issues`
+   - `checks`
+   - `summary`
+   - `sources`
+   - `uncertainty`
+   - `pending_human`
+   - `review_records`
+   - `errors`
+   - `degradations`
+   - `changes`
+   - `artifacts`
+   - `runtime`
+   - `contract_fields`
+2. 嵌套 `output_contract`：原始 `output_contract` 要求的每个字段也必须在 `output_contract` 对象中出现一次，且 `case_id` 与顶层一致。
 
-## 5. 本题专属执行流程（编号步骤）
+如果原始 `output_contract` 缺失或为空，依据 Runtime contract 默认字段准备回填；无对应值的键置 `null` 并记入 `contract_fields.unfilled`。
 
-### 步骤 1：盘点输入与契约
+### 7.3 可编辑 Office/幻灯片/图形产物
 
-**输入**：`/input/case.json`、`/input/task.md`、题面规定材料。
+若 `output_contract` 或题面要求 Office/slide/diagram 产物：
 
-**动作**：
-- 列出 `/input` 下文件及其类型。
-- 读取 `case.json`，提取 `case_id` 和 `output_contract` 要求的全部字段。
-- 若 `output_contract` 缺失或为空，依据本题 Runtime contract 默认字段准备回填。
-
-**输出**：文件清单、契约字段清单、材料可解析性初判。
-
-**失败分支**：目录不存在/为空 → `status=input_error`，仍继续产出合法 `result.json`；`case.json` 坏 JSON → 记 `errors:case_json_invalid`，契约字段只能置空。
-
-### 步骤 2：运行基线 scaffold，尽早落盘 partial
-
-**输入**：上一步文件清单。
-
-**动作**：
-- 运行：
-  ```bash
-  python3 scripts/main.py --input /input --output /app/output --stage scaffold
-  ```
-- 产生全套基线候选与 partial `result.json`、`packets.md`、`candidates.json`。
-
-**输出**：基线 partial 产物；六面候选分组。
-
-**失败分支**：脚本异常也要保证退出码 0，结果文件存在；记 `errors` 后继续人工兜底解析。
-
-### 步骤 3：真实解析材料，构建/核对证据
-
-**输入**：材料文件、scaffold 候选。
-
-**动作**：
-- 对每个关键材料用 `pdf-text-tool` 或 `scripts/extract.py` 提取文本。
-- 对每个候选面，回到候选 `locator`/`line` 处查看原文上下文。
-- 对关键数字、引用编号、伦理表述、版权表述、统计量做二次确认；必要时手动查看来源文件。
-
-**输出**：你本人确认过的原文片段、候选证据清单、缺失或不可解析项目。
-
-**失败分支**：PDF 无文本层 / 图片 / DOCX 损坏 → 记 `errors` 或 `degradations`，不猜测内容；该来源标 `unreadable`。
-
-### 步骤 4： Agent 亲自逐条裁定并补漏
-
-**输入**：候选清单、原文定位、六面清单 `/app/work/review/packets.md`。
-
-**动作**：
-- 对每条候选四选一：
-  1. 成立 → 写入 `issues[]`，要求 `locator`、`line`、`quote`、`severity`、`verdict_type`、`reason`、`suggestion`、`evidence`。
-  2. 证据不足 → 写入 `issues`，`verdict_type=insufficient_evidence`，并加入 `pending_human`。
-  3. 风格差异或误报 → 写入 `review_records.rejected_issues` 或 `dismissed`，给理由。
-  4. 脚本漏报 → 你亲自追加 issue。
-- 六面均给 `status`：`pass`、`issues_found`、`incomplete`、`not_applicable`；有未裁定候选不得 `pass`。
-- 对无法确认的条目标记 `pending_human`，不凭空补结论。
-
-**输出**：完整 `issues[]`、六面 `checks{}`、待复核清单。
-
-**失败分支**：时间或请求数不足 → 保留 partial，`summary.unaddressed` 列明未完成面。
-
-### 步骤 5：产出完整成品
-
-**输入**：你的裁定结果。
-
-**动作**：
-- 撰写 `review_report.md`：六面覆盖、逐条问题、原文定位、依据与修改建议、待复核/拒收、不确定性。
-- 生成 `issues.csv`，与 `issues[]` 行一致。
-- 运行：
-  ```bash
-  python3 scripts/main.py --input /input --output /app/output --stage finalize
-  ```
-  让其做逐字校验、去重、契约回填、渲染；但你必须确认校验后没有丢失你的裁定或被误拒。
-
-**输出**：最终 `result.json`、`review_report.md`、`issues.csv`。
-
-**失败分支**：finalize 导致字段缺失 → 手工补回 `output_contract` 字段与 `case_id`；仍以合法 JSON 保存。
-
-### 步骤 6：rubric 自检与证据回填
-
-**输入**：最终产物。
-
-**动作**：
-- 逐条对照第 11 节 rubric 表，检查交付物是否覆盖高权重项。
-- 核查 `quote` 逐字命中、`evidence` 来源可回查、`output_contract` 字段齐全。
-- 更新 `result.json.review_records`：写入 `reviewed_by_agent: true`、关键核验结论、剔除项理由。
-- 更新 `changes`：记录你从 scaffold 到 final 的实质性修改。
-
-**输出**：经过自检的最终结果。
-
-**失败分支**：发现契约字段缺失或预览缺失 → 立即补齐；补不上则在 `degradations`/`pending_human` 如实标注。
-
-### 步骤 7：终态落盘
-
-**动作**：确认 `/app/output` 文件完整、`result.json` 合法、退出码 0；保留所有基线与增强产物。
-
-**失败分支**：若时间耗尽，保持当前 honest partial；不得删除 partial 结果或伪造终态。
+- 必须同时产生真实渲染的 PDF/PNG 预览；
+- 若环境无渲染工具，写 `degradations:preview_missing`，`status` 不得为 `pass`；
+- 不得伪造预览或谎称已渲染。
 
 ---
 
-## 6. 预算策略：64 次模型请求 / 900 秒 / 16384 tokens
-
-Rubric 权重最高的是**实际效果 40 分**，因此预算优先保证：完整 `issues`、正确性、完整性、可核验性。其次保证可靠体验与使用增益。
-
-| 阶段 | 预计请求 | 必须/可跳过 | 说明 |
-|---|---|---|---|
-| 盘点输入、读 case/task/契约 | 2-4 | 必须 | 一次性读取，避免反复打开 |
-| 运行 scaffold、读候选 | 1-3 | 必须 | 脚本调用不算模型推理，但读产物算 |
-| 按面读原文关键片段 | 8-15 | 必须 | 合并阅读同一材料，避免重复 |
-| 六面逐条裁定 | 6-12 | 必须 | 每面可批量处理，不逐句循环 |
-| 补充检查脚本漏报 | 3-6 | 条件 | 高权重面优先；低权重可跳过 |
-| 写报告、回填 result | 3-5 | 必须 | 尽量一次生成，少改 |
-| 自检与契约核对 | 2-4 | 必须 | 发现缺失时低成本补齐 |
-| 安全缓冲 | 5-10 | 保留 | 处理意外，不主动用满 |
-
-**何时落盘 partial**：
-- scaffold 完成后立即保存 partial。
-- 每完成一个检查面的裁定并写回 issue，可增量更新一次。
-- 当已用约 50 次请求或运行时间约 700 秒时，停止新增检查，立即 finalize 当前部分结果。
-- 若只剩 2-3 次请求，只做契约字段补齐，不再扩写报告。
-
-**避免无意义循环**：同一文件不要重复提取；同一候选不要反复读；如果材料已经足以判断，不要反复调用脚本。
-
----
-
-## 7. 隐藏案例鲁棒性与降级
+## 8. 隐藏案例鲁棒性
 
 | 情况 | 表现 | 处置 |
 |---|---|---|
-| 输入目录不存在/为空 | `status=input_error`，`errors: input_missing` | 仍出合法 `result.json`，六面 `checks` 为 `not_applicable`，退出码 0 |
-| `case.json` 坏 JSON |
+| 正常学术论文/结题材料 | 有可提取文本，有引用/方法/统计/伦理/版权等风险面 | 按六面逐项审，产出完整 issues/report/csv |
+| 边界材料：PDF 无文本层、扫描件、图片、内联文本 | 可解析部分仍可审；不可解析部分登记 | 可解析来源继续六面检查；不可解析来源标 `unreadable` 或 `image_not_read`；不猜测内容 |
+| 材料非常短/只有任务说明 | 检查项仍需建立 | 对每面标 `not_applicable` 或 `incomplete`，说明材料不足以触发该面；不得编造候选 |
+| 异常：缺 `case.json`、坏 JSON、空输入 | `status=input_error` | 退出码 0；输出合法 `result.json`；`case_id` 若能恢复则恢复，否则写 `case_id: null`；契约字段尽量置空并记 unfilled |
+| 异常：特定工具不可用 | `errors` 记录工具名与失败原因 | 回退到标准库解析；仍无法解析则标 unreadable |
+| 异常：材料缺失承诺的附录/文献/伦理附件 | `missing_materials` 列缺项 | 相关检查面标 `incomplete`，不要把“未提供”判成“违规” |
+| 异常：目标期刊指南缺失 | 投稿要求面标 `incomplete` | 不编造期刊要求；写 `journal_guide_missing` |
+
+---
+
+## 9. 预算优先级：64 次模型请求 / 900 秒 / 16384 tokens
+
+预算优先保证高权重项：实际效果 40 分 > 使用增益 25 分 > 创新/可靠/生态。
+
+| 阶段 | 请求估算 | 策略 |
+|---|---|---|
+| 盘点输入、读 case/task/契约 | 2-4 | 一次性读取 |
+| 运行 init/scaffold，读候选 | 1-3 | 脚本调用不计模型请求，但读产物计 |
+| 按面读原文关键片段 | 8-15 | 合并读取，避免重复打开 |
+| 六面逐条裁定 | 6-12 | 每面批量处理，不逐句循环 |
+| 补漏、核验关键数字/引用 | 3-6 | 高权重面优先 |
+| 写 draft、写报告、回填 result | 3-5 | 尽量一次生成 |
+| 自检与契约核对 | 2-4 | 发现缺失低成本补齐 |
+| 安全缓冲 | 5-10 | 保留，不主动用满 |
+
+**落盘纪律：**
+
+- 脚本 init/scaffold 完成后立即落 partial。
+- 每完成一个检查面并可写回 issue，可增量更新一次。
+- 约 50 次请求或约 700 秒时，停止新增检查，进入 finalize。
+- 只剩 2-3 次请求时，只补契约字段与 status，不再扩写报告。
+
+---
+
+## 10. 误报抑制与正确性红线
+
+以下情况**不得**直接判为问题：
+
+- 仅因“用词风格/句式/学科惯例不同”；
+- 仅因“没有主动声明某项非强制性内容”；
+- 仅因“材料未提供”，除非该缺失本身构成规范问题；
+- 仅因“引文无法离线核验”，必须标 `insufficient_evidence`，不写“引文不存在”；
+- 仅因“疑似不当”，没有原文证据。
+
+误报的每一条都会同时损害“正确性 15 分”和“质量增益 15 分”。宁可把不确定项留在 `pending_human`，也不要把启发式候选全量进 `issues`。
+
+---
+
+## 11. 自检清单（最终落盘前必须逐项核对）
+
+1. `result.json` 顶层与嵌套 `output_contract` 都有原始 `case_id`。
+2. 每个 `issue` 都有 `locator`、`quote`、`severity`、`verdict_type`、`reason`、`suggestion`、`evidence`。
+3. `quote` 与原文逐字一致。
+4. 六面检查都有状态；未检查项在 `summary.unaddressed` 或 `checks` 中说明。
+5. `review_report.md` 与 `issues.csv` 与 `result.json.issues` 一致。
+6. `sources` 中来源编号与正文 locator 对应。
+7. 无对应值的契约字段置 `null` 并记入 `contract_fields.unfilled`。
+8. 没有删除或清空 scaffold 基线产物。
+9. 有异常时 `errors`/`degradations` 已写，`status` 诚实。
+10. 退出码为 0。
+
+---
+
+## 12. 生态与复用声明
+
+本 Skill 的资源与脚本应保持纯 Python 标准库、离线可用、`python3 >= 3.8`、不依赖当前工作目录。使用以下现有资源：
+
+- `references/checklist.md`：六面详细检查项与触发条件；
+- `references/examples.md`：问题写法、误报示例、建议措辞；
+- `references/schema.md`：`result.json` 契约与 `draft.json` 字段说明；
+- `scripts/extract.py`：PDF/DOCX/XLSX/文本提取；
+- `scripts/main.py`：init/build/selfcheck 全流程入口。
+
+如包内存在 `SELFTEST.md` 或 `environment/resources.yaml`，按其中说明执行；如不存在，则以本 SKILL 第 11 节作为自检清单。不得声称未随包提供的文件存在。

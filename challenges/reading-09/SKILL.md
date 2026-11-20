@@ -1,177 +1,413 @@
 ---
-name: section-anchored-paper-notes
-description: 将真实科研论文转化为按论文自身章节对齐、字段齐备、每条关键结论可回链原文的结构化阅读笔记。Harness Agent 必须先运行包内脚本获取基线解析与候选证据，再亲自阅读解析文本，逐章撰写/核验论文卡片、章节笔记、图表锚点与 claims 表；脚本只是工具，最终交付物不得直接使用脚本自动生成的骨架或模板。适用场景：总结论文、构建结构化笔记、提取研究问题/数据/方法/结果/局限、核验结论与原文一致性。处理 PDF、DOCX、XLSX、CSV、HTML、JSON、TXT 等离线材料；对扫描件、加密、无标题、低文本或缺失材料诚实降级，不编造引用、数据或分数。
-version: 1.1.0
+name: literature-structured-notes
+description: 将真实科研材料解析为按论文自身章节对齐、字段齐备、逐条结论可回链原文的结构化阅读笔记。优先运行 scripts/main.py run 完成 init→build→selfcheck；Agent 可先读台账与原文撰写 draft.json，再 check/build；无 draft 时脚本确定性抽取兜底。绝不编造缺失数据、引用、分数或软件状态，异常也 exit 0。适用于 PDF、DOCX、XLSX、CSV、HTML、JSON、TXT、MD、XML、TEX 等离线材料，支持科研阅读、问答、提取、翻译、核验与知识结构化。
+version: 2.0.0
 ---
 
-# Section-Anchored Paper Notes (reading-09)
+# Section-Anchored Paper Notes
 
-## 0. 最高优先级：完整性优先与真实推导
+## 0. 最高优先级：真实读取、完整交付、诚实降级
 
-1. **脚本只是工具**。`scripts/main.py`、`scripts/doctext.py` 负责把材料解析为可用文本、候选章节、候选 claims 与基线 `result.json`。**最终交付物必须由你（Harness Agent）亲自读材料、推导、撰写/制作**，不能把脚本骨架、自动模板或候选输出直接当成品提交。
-2. **先跑基线，再增强**。进入任务后，先把包内主脚本产出的一套完整基线落盘到 `/app/work/baseline`，包括 `result.json`、`notes.md`、`claims.csv`、`verify_report.json`。后续所有 Agent 改写只在该基线之上增量增强，**不得删除、清空或遗漏任何基线字段**。若不确定某些字段，保留原值并在 `changes[]` 中标注 `reviewed_by_agent`。
-3. **诚实 partial 优先**。任何时候预算或时间紧张，优先保证合法 `result.json` 和主产物存在，并显式标注 `status: partial`、`limits[]` 与待人工接管项。
-4. **禁止编造**。题目没有提供的事实、数字、引用、分数、对比结果，一律不写。材料不足写 `not_found_in_extracted_text`、`pending_human` 或 `limitations`，不能把“提取不到”改写成“原文未报告”。
+1. **实际材料优先**：必须阅读 `/input` 下真实文件，不依据文件名、标签或领域猜测补造内容。
+2. **单命令全流程入口**：先尝试运行：
+   ```bash
+   python3 scripts/main.py run --input /input --output /app/output --work /app/work
+   ```
+   该命令内部应完成 `init → build → selfcheck`。如果脚本版本不支持 `run`，立即 fallback 到 §4.3 的命令序列，不得中断。
+3. **Agent-first，但必须有确定性兜底**：
+   - Agent 路径：先跑 init 看台账，再读解析文本，把判断写入 `${WORK}/draft.json`，然后运行 build；
+   - 无 draft 时：build 必须根据 init 台账做确定性抽取，生成实质工作稿，并在 `degradations[]` 中诚实记录 `AUTO_EXTRACT`。
+4. **结果优先预算**：任何情况下先落盘合法 `result.json`、`notes.md`、`claims.csv`；预算紧张时保留 `partial`，写清 `limits[]` 与 `pending_human[]`。
+5. **禁止编造**：抽取不到写 `not_found_in_extracted_text`；原文未报告写 `not_reported_in_source`；不确定写 `uncertainty[]`；禁止把“提取不到”改写成“原文未报告”。
+6. **退出码恒 0**：运行失败、材料缺失、契约缺失、预算耗尽都要生成合法 `/app/output/result.json` 后退出 0。
 
 ---
 
 ## 1. 用途与边界
 
-**做**：真实解析论文并按其自身标题切分章节；生成论文卡片 9 字段；逐章写证据笔记；提取图表/表格题注锚点；构建可核验 claims 表；每条关键结论带逐字引用、页码/章节/句级定位、条件与可读性等级。
+**做**：
+- 按论文自身章节结构生成章节对齐笔记，而不是通用摘要；
+- 生成论文卡片字段：研究问题、假设、数据/样本、方法、主要结果、结论、局限性、资助/利益冲突、可获得性；
+- 抽取图表题注锚点；
+- 构建可核验 claims 表，每条关键结论带逐字 quote、来源编号、页码/段落/句级 locator；
+- 回答 task.md 中明确要求的问答、翻译、提取、核验或知识结构化任务；
+- 保留输入 case_id、运行状态、来源、不确定性、人工接管项。
 
-**不做**：不补全原文未报告的数据、样本量、统计量、DOI、引用；不读取图形像素；不把“提取不到”写成“原文未报告”或反之；不使用通用摘要模板替代论文章节结构。
+**不做**：
+- 不补全原文未报告的数据、样本量、统计量、DOI、引用；
+- 不读取图形像素；
+- 不使用通用摘要模板替代论文结构；
+- 不自造 `golden_standard`、基准分数、金标准答案或未运行的 benchmark 结果；
+- 不把脚本生成骨架直接当作最终成稿，除非无 draft 时由确定性兜底生成并明确标注 `AUTO_EXTRACT`。
 
 ---
 
-## 2. 运行契约
+## 2. 运行环境与资源
 
-在 Skill 根目录 `/skills/weekly-skill` 下执行：
+- 包根目录：`/skills/weekly-skill`
+- 输入目录：`/input`
+- 工作目录：`/app/work`
+- 最终产物目录：`/app/output`
+- 仅用 Python 标准库，Python ≥ 3.8
+- 离线运行，不访问网络
+- 包内现有资源：
+  - `scripts/main.py`：主流程，优先使用 `run` 子命令
+  - `scripts/doctext.py`：单文件文本抽取工具
+  - `references/rules.json`：契约字段/同义映射/抽取规则
+  - `references/schema.md`：输出 schema 与 draft 形状
+  - `references/notes_template.md`：结构化笔记模板
+- 不要引用包内不存在的文件；如需临时文件写在 `/app/work`，最终交付在 `/app/output`。
+
+---
+
+## 3. 输入发现与 contract 识别
+
+### 3.1 读取顺序
+
+1. 读 `/input/case.json`；若不存在，找 `/input` 下 `case*.json`。
+2. 读 `/input/task.md`，确认本题具体任务：是章节笔记、论文卡片、知识点提取、问答、翻译、核验还是混合任务。
+3. 递归扫描 `/input/**`，跳过 `case.json`、`task.md`、空文件、隐藏文件。
+4. 通过扩展名与文件头识别材料类型：`%PDF`、`PK`、DOCX、XLSX、CSV、TSV、HTML、JSON、TXT、MD、XML、TEX、图片。
+5. 主来源 = 可解析文本最长的文档；其余记 `secondary`；图片记 `role: image_not_pixel_read` 并加入 `pending_human[]`。
+
+### 3.2 contract 字段识别
+
+- `output_contract|outputContract|contract|result_contract` 任一命中即为输出契约。
+- `case_id|id|caseId` 任一命中即为案例标识，必须原样透传。
+- 如果 `case.json` 坏 JSON，记录 `input_error` 后继续。
+- 如果 `output_contract` 缺失，按本文件 §5 的默认结构化输出生成合法 result，并注明 `contract_missing`。
+
+---
+
+## 4. 执行流程
+
+### 4.1 预算意识
+
+官方预算：64 次模型请求、900 秒、单次响应 16384 tokens（含 reasoning）。脚本运行不占用模型请求，但占用墙钟时间。必须优先完成最小完整交付，再增量增强。
+
+### 4.2 推荐单命令
 
 ```bash
-python3 scripts/main.py --input /input --output /app/work/baseline          # 生成基线
-python3 scripts/main.py --check --input /input --output /app/work/baseline  # 复现性检查
-python3 scripts/doctext.py --help                                            # 单文件抽取器帮助
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
 ```
 
-输入：`/input/case.json` + `/input/task.md` + `/input/**` 材料。  
-工作目录：`/app/work`。最终产物：`/app/output/`。  
-仅使用标准库（Python ≥3.8），不联网，不依赖当前工作目录。  
-**先写 partial `result.json`**，之后无条件 finalize；异常进入 `errors[]`、`degradations[]`、`pending_human[]`；**退出码恒 0**。
+该命令应完成：
+
+1. `init`：盘点材料、生成 source_id、抽取候选章节与候选 claims、冲突分组、写入 `/app/work/inventory.json` 与 `/app/work/baseline`。
+2. `build`：校验抽取质量；若存在 `/app/work/draft.json` 则合并 Agent 判断；否则确定性兜底抽取；渲染全部产物；finalize `/app/output/result.json`。
+3. `selfcheck`：检查产物与 output_contract 字段、文件映射、quote 命中率、result.json 合法性。
+
+### 4.3 如果 `run` 子命令不可用
+
+按以下顺序执行，并把执行轨迹写入 `changes[]`：
+
+```bash
+python3 scripts/main.py --input /input --output /app/output
+python3 scripts/main.py --check --input /input --output /app/output
+```
+
+若主文档无法被 main.py 成功解析，可用：
+
+```bash
+python3 scripts/doctext.py --help
+```
+
+对单文件尝试抽取，结果写入 `/app/work/extracted/`。
+
+### 4.4 Agent 路径：先读台账，再写 draft
+
+当预算允许时，按以下顺序增量改进：
+
+1. 读取 `/app/work/inventory.json` 与 `/app/work/baseline`。
+2. 读取 `/app/work/extracted/*.txt` 或 baseline 中的逐字 quote 与 page_map。
+3. 核对 task.md 与 output_contract 的全部必需字段。
+4. 亲自撰写/核验 `paper_card`、`section_notes`、`claims`、`figures`、`gaps`，将判断写入 `/app/work/draft.json`。
+5. 运行：
+   ```bash
+   python3 scripts/main.py run --input /input --output /app/output --work /app/work --draft /app/work/draft.json
+   ```
+   或等价地 `check` 后 `build`。
+6. 不得手工覆盖 `result.json`；结构化 JSON 由脚本 build 生成。
+
+### 4.5 无 draft 时确定性兜底
+
+如果未生成 `/app/work/draft.json`，build 必须利用 init 台账做确定性抽取：
+- 逐字 quote 必须来自解析文本；
+- locator 必须来自 page_map/章节/句索引；
+- 无法抽取的字段写 `not_found_in_extracted_text`；
+- 在 `degradations[]` 中记录 `AUTO_EXTRACT`；
+- 该兜底仍须生成完整 `/app/output` 产物。
+
+### 4.6 产物落盘顺序
+
+1. `/app/output/result.json` — 主结果，必须合法 JSON；
+2. `/app/output/notes.md` — 结构化阅读笔记；
+3. `/app/output/claims.csv` — evidence 表；
+4. `/app/output/verify_report.json` — 自检报告；
+5. 如 output_contract 要求额外文件，如 `paper_card.json`、`evidence_table.json`、`figures.json`、`answers.json`，按字段映射生成；
+6. 如生成 Office、幻灯片或图形，必须同时渲染真人可查看的 PDF/PNG 预览到 `/app/output`。
 
 ---
 
-## 3. 输入发现（语义识别，不假设键名）
+## 5. 默认输出契约与 result.json
 
-1. 读 `/input/case.json`；缺失则找 `case*.json`。坏 JSON 记录错误后继续。
-2. `output_contract|outputContract|contract|result_contract` 任一命中即输出契约；`case_id|id|caseId` 任一命中即案例标识，原样透传。
-3. 递归扫描 `/input/**`，跳过 `case.json`、`task.md`、空文件、隐藏文件；按扩展名 + 文件头（`%PDF`、`PK`）识别 PDF/DOCX/XLSX/CSV/TSV/HTML/JSON/TXT/MD/XML/TEX 与图片。
-4. 主来源 = 可解析文本最长的文档，其余记 `secondary`；图片记 `role: image_not_pixel_read` 并加入 `pending_human[]`。
-5. 材料缺失、无 case、无材料或仅图片时，记 `input_error` 与缺口清单，不构造内容。
+`result.json` 必须同时具备：
 
----
+- **顶层真实字段**：`case_id`、`status`、`sources`、`claims`、`paper_card`、`section_notes`、`figures`、`gaps`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`coverage`、`runtime`；
+- **嵌套 `output_contract` 回显**：输入契约的完整结构，字段名不改不删，缺失填 `null`/`[]`，已确定字段填入真实值。顶层与嵌套中的 `case_id`、契约字段都要对得上。
 
-## 4. 输出契约
-
-最终 `result.json`（主结果）、`notes.md`（主产物）、`claims.csv`（证据表）、`verify_report.json`（自检）必须全部落在 `/app/output/`。
+### 5.1 字段含义
 
 | 字段 | 内容 |
 |---|---|
-| `case_id` / `status` | 原样回填 / `ok`·`partial`·`insufficient_evidence`·`input_error` |
-| `claims[]` | `claim_id, kind, quote(逐字), statement, source_id, location{page,page_end,section_id,section_title,section_kind,sentence_index,char_start,char_end,anchor,pointer}, conditions[], numbers[], readability, confidence, verified_quote_hit` |
-| `paper_card` | 9 字段：`research_question, hypothesis, data_sample, methods, key_results, conclusions, limitations, funding_coi, availability` → `{value, claim_ids, status, readability, pages}` |
-| `section_notes[]` | `{section_id, title, kind, pages, sentences, claim_ids, readability:"inferred"}` |
-| `figures[]` | 图表题注锚点 `{label, caption, page, anchor, elements:"not_parsed"}` |
-| `gaps[]` | 无证据字段（`not_found_in_extracted_text`，≠原文未报告） |
-| `uncertainty[]` / `pending_human[]` | 不确定项 / 人工动作，均带 `pointer` |
-| `errors[]` / `degradations[]` / `changes[]` | 异常、降级、运行轨迹 |
-| `coverage` | 章节/证据/命中率/卡片覆盖/图表/缺口计数 + `page_map`（每页 `char_start`、字符数） |
+| `case_id` | 原样回填，来自输入；无法得到填 `null` |
+| `status` | `ok`、`partial`、`insufficient_evidence`、`input_error` 中真实取值 |
 | `sources[]` | `{source_id, name, path, kind, pages, chars, quality, role}` |
-| `output_contract_echo` | 输入契约完整键结构回填：未知键保留，缺值 `null`/`[]`，按语义填入真实值 |
-| `runtime` | 版本、Python、起始时间、耗时、实际模型请求（不要编造为 0，须真实记录） |
+| `claims[]` | `{claim_id, kind, quote, statement, source_id, location{page,page_end,section_id,section_title,section_kind,sentence_index,char_start,char_end,anchor,pointer}, conditions[], numbers[], readability, confidence, verified_quote_hit}` |
+| `paper_card` | 9 字段：`research_question, hypothesis, data_sample, methods, key_results, conclusions, limitations, funding_coi, availability`，每个为 `{value, claim_ids, status, readability, pages}` |
+| `section_notes[]` | `{section_id, title, kind, pages, sentences, claim_ids, readability}` |
+| `figures[]` | `{label, caption, page, anchor, elements:"not_parsed"}` |
+| `gaps[]` | 无证据字段，`{field, status, pointer, reason}` |
+| `uncertainty[]` | 不确定项，`{item, pointer, reason}` |
+| `pending_human[]` | 人工动作，`{action, pointer, reason}` |
+| `errors[]` / `degradations[]` | 运行异常/降级，`{time, step, message, evidence}` |
+| `changes[]` | 变更轨迹，至少包含 `baseline_generated`、`draft_written`、`auto_extract_fallback`、`finalized` 中发生项 |
+| `coverage` | 章节/证据/命中率/卡片覆盖/图表/缺口计数 + `page_map` |
+| `runtime` | 版本、Python 版本、开始时间、耗时、实际模型请求数；不得编造模型请求数 |
 
-契约回填：先按输入结构生成骨架，再依据 `references/rules.json` 的 `syn` 映射写入 `claims/sources/uncertainty/...` 真实值；键名不改不删。
+### 5.2 文件与契约字段映射
 
----
-
-## 5. 本题专属执行流程（编号步骤）
-
-### 步骤 1：盘点输入与预算
-- **输入**：`/input/case.json`、`/input/task.md`、`/input/**`。
-- **动作**：读取 `case.json` 与 `task.md`；识别 `case_id`、`output_contract` 全部字段；扫描材料清单；确认 64 次模型请求、900 秒、单次响应 16384 tokens 的预算。
-- **输出**：在 `/app/work/inventory.json` 中记录 case_id、材料路径、契约字段清单、主材料类型。
-- **失败分支**：缺 `case.json` 或材料时，记 `input_error` 并继续，不中断最终产出。
-
-### 步骤 2：真实解析材料并生成基线
-- **输入**：`/app/work/inventory.json` 中的材料路径。
-- **动作**：
-  1. 运行 `python3 scripts/main.py --input /input --output /app/work/baseline`，得到基线 `result.json`、`notes.md`、`claims.csv`、`verify_report.json`。
-  2. 若主材料为 PDF/DOCX 等，可用 `pdf-text-tool` 或包内 `scripts/doctext.py` 提取全文到 `/app/work/extracted/<source_id>.txt`；若提取失败，保留 `degradations[]`。
-  3. 复制基线文件到 `/app/output/` 作为初始 honest partial，并在 `status` 中标注 `partial`，`changes[]` 注明 `baseline_generated`。
-- **失败分支**：解析失败、加密、扫描件等，按 §7 降级，仍写入合法 `result.json`。
-
-### 步骤 3：阅读任务要求与评分权重
-- **输入**：`/input/task.md`、`/app/work/baseline/result.json`。
-- **动作**：阅读题目对材料结构、笔记类型、交付物的具体命令；识别 rubric 中权重最高的任务完成度（40 分）和使用增益（25 分）相关要求；确定哪些字段必须重点补强。
-- **输出**：在 `/app/work/plan.md` 中列出优先顺序：主产物完整性 > 逐条证据正确性 > 章节对齐与可核验性 > 创新字段 > 异常说明。
-- **失败分支**：若 `task.md` 缺要求，默认按本文件 §4 输出契约执行。
-
-### 步骤 4：逐章阅读抽取文本并亲自撰写章节笔记
-- **输入**：`/app/work/extracted/` 中的解析文本或脚本基线中的逐字 `quote` 与 `page_map`。
-- **动作**：按脚本切分的章节顺序，逐章阅读原文文本；每章撰写 `purpose`、`methods`、`results`、`conclusions`、`limitations` 等小节，并标注 `section_id`、页码、句级锚点。**不得直接复制脚本 `notes.md` 作为最终内容**，必须由 Agent 在阅读后重写/确认。
-- **输出**：临时章节笔记写入 `/app/work/section_notes/`，每个章节一个文件；最终合并进 `/app/output/notes.md`。
-- **失败分支**：某章无标题或文本低质量，退化单章 `S1 Full text`，加 `headings_not_detected` 与 `uncertainty[]`。
-
-### 步骤 5：抽取论文卡片、图表锚点与核验 claims
-- **输入**：抽取文本、基线 `result.json` 中的候选 claims。
-- **动作**：
-  1. 从章节笔记中选取最高置信度逐字引用，填写 `paper_card` 9 字段；无证据字段写 `not_found_in_extracted_text`。
-  2. 从题注中提取 `figures[]` 的 `label/caption/page/anchor`；不读取图表内部像素。
-  3. 逐条核验 claims 的 `quote` 是否能在原文定位到；能定位则 `verified_quote_hit=true`，不能则进 `pending_human[]`。
-  4. 检查数字、单位、条件是否与原文一致；只保留原文字符串，不改写、不换算。
-- **输出**：更新 `/app/output/result.json` 中的 `paper_card`、`figures[]`、`claims[]`，并写 `coverage`。
-- **失败分支**：有冲突时保留所有冲突 claims，选最高 `confidence` 作为 `value`，其余留在 `claim_ids` 并在 `notes.md` 列出。
-
-### 步骤 6：整理最终 notes.md 与 claims.csv
-- **输入**：`/app/work/section_notes/`、更新后的 `claims[]`。
-- **动作**：按论文原有章节顺序生成最终 `notes.md`，包含运行摘要、论文卡片表、章节地图、逐章笔记、图表锚点、缺口与人工动作。`claims.csv` 与最终 `claims[]` 对齐。
-- **输出**：覆盖 `/app/output/notes.md` 与 `/app/output/claims.csv`。
-- **失败分支**：时间不足时，保留当前 partial 的 `notes.md` 并标注 `pending_review`，但不得缺失主结果。
-
-### 步骤 7：回填 result.json 所有 output_contract 字段
-- **输入**：`/input/case.json` 中的 `output_contract`、更新后的所有真实结果。
-- **动作**：逐一核对输出契约键，缺值填 `null`/`[]`；把最终 `claims[]`、`sources[]`、`uncertainty[]`、`limited`、`changes[]` 等映射回 `output_contract_echo`。`case_id` 原样回填。`status` 取 `ok` 或 `partial` 等真实状态。
-- **输出**：最终 `/app/output/result.json`，包含全部契约字段。
-- **失败分支**：契约缺失时，按本文件 §4 字段生成合法 result，并注明 `contract_missing`。
-
-### 步骤 8：渲染预览与最终自检
-- **输入**：`/app/output/` 当前产物。
-- **动作**：若产出可编辑 Office/幻灯片/图形，先生成真实 PDF/PNG 预览放入 `/app/output`。运行 `python3 scripts/main.py --check --input /input --output /app/output`，检查可复现性与 quote 命中率。运行自检清单 §9。
-- **输出**：`verify_report.json`，其中 `pass` 应为 true；若 false，修复对应项或诚实降级。
-- **失败分支**：无法修复时，在 `errors[]`、`degradations[]` 写清原因和人工接管位置。
-
-### 步骤 9：收尾与退出码 0
-- **动作**：确认 `/app/output/result.json`、`notes.md`、`claims.csv`、`verify_report.json` 存在且合法；确认 `status` 真实；确认退出码 0。写 `changes[]` 记录所有嵌改。
+- 每个 output_contract 字段必须对应到磁盘文件或 result.json 顶层字段。
+- 若契约要求“可编辑 Office/slide/diagram”，必须同时提供渲染 PDF/PNG。
+- 若契约要求“答案/翻译/QA”，在 `notes.md` 的主结果中回答，并在 `result.json` 顶层与 `output_contract` 中放入同一答案。
+- 不允许只有 result.json 而没有人类可读主产物。
 
 ---
 
-## 6. 预算策略（64 次模型请求 / 900 秒）
+## 6. Agent 写 draft.json 的规范
 
-| 步骤 | 建议请求数 | 说明 |
-|---|---|---|
-| 盘点输入 + 任务要求 | 2-3 | 读 case、task、扫描材料清单，识别契约 |
-| 运行脚本/提取工具 | 0 | 脚本运行不消耗模型请求，但有时间成本 |
-| 逐章阅读与撰写 | 15-25 | 每章 1-2 次读取/撰写；优先高信息量章节 |
-| 论文卡片 + 图表 + claims 核验 | 6-10 | 对关键数字、方法、结果逐条回原文核验 |
-| 整合 notes.md + result.json | 4-6 | 合并、回填、自检 |
-| 自检修复 | 2-4 | 查漏补缺，确认契约字段 |
-| 合计 | 约 30-50 | 保留 64 以内的安全余量 |
+`/app/work/draft.json` 是 Agent 判断文件，不是最终 result.json。形状应遵循 `references/schema.md`；若 schema 缺失，至少包含：
 
-**必须优先**：`result.json` 合法落盘 > `notes.md` 主产物 > `claims.csv` 证据表 > `verify_report.json` 自检。  
-**可跳过**：若时间不足，可跳过低权重美化；不得跳过契约字段回填与诚实状态标注。  
-**尽早 partial**：步骤 2 完成后立即复制基线到 `/app/output`；每完成一章更新一次 `result.json` 和 `notes.md`。
+```json
+{
+  "case_id": "",
+  "paper_card": {
+    "research_question": {"value": "", "claim_ids": []},
+    "hypothesis": {"value": "", "claim_ids": []},
+    "data_sample": {"value": "", "claim_ids": []},
+    "methods": {"value": "", "claim_ids": []},
+    "key_results": {"value": "", "claim_ids": []},
+    "conclusions": {"value": "", "claim_ids": []},
+    "limitations": {"value": "", "claim_ids": []},
+    "funding_coi": {"value": "", "claim_ids": []},
+    "availability": {"value": "", "claim_ids": []}
+  },
+  "section_notes": [
+    {
+      "section_id": "S1",
+      "title": "",
+      "kind": "introduction|methods|results|discussion|conclusion|other",
+      "pages": [],
+      "purpose": "",
+      "methods": "",
+      "results": "",
+      "conclusions": "",
+      "limitations": "",
+      "claim_ids": []
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C1",
+      "kind": "research_question|hypothesis|data|method|result|conclusion|limitation|availability|other",
+      "source_id": "S1",
+      "quote": "",
+      "statement": "",
+      "locator": {
+        "page": 1,
+        "section_id": "S1",
+        "section_title": "",
+        "sentence_index": 0,
+        "char_start": 0,
+        "char_end": 0,
+        "anchor": "Introduction, paragraph 1"
+      },
+      "conditions": [],
+      "numbers": [],
+      "confidence": "high|medium|low",
+      "readability": "inferred|verbatim",
+      "verified_quote_hit": true
+    }
+  ],
+  "figures": [
+    {
+      "label": "",
+      "caption": "",
+      "page": 0,
+      "anchor": ""
+    }
+  ],
+  "gaps": [],
+  "uncertainty": [],
+  "pending_human": [],
+  "agent_review": {
+    "baseline_read": true,
+    "all_contract_fields_reviewed": true,
+    "summary": ""
+  }
+}
+```
+
+**写入 draft 的规则**：
+- `quote` 必须是原文逐字字符串，禁止改写、换算、翻译后冒充原文；
+- `locator` 必须可回原文；章节、页码、句索引、char_start/char_end 至少有一项有效；
+- 冲突结论保留为多条 claims，在 `conditions[]` 或 `uncertainty[]` 说明；
+- 没有证据时不要写 confidence=high。
 
 ---
 
-## 7. 隐藏案例鲁棒性
+## 7. 证据与来源回链协议
 
-| 情况 | 检测 | 处置 | 状态 |
+1. 来源编号：主材料 `S1`，次要材料 `S2`、`S3`...；链接到 `sources[]`。
+2. 正文引注格式：每条关键数字、论断、变量、方法条件后面标注 `[S#] @file#L行号/段落号` 或 `[S#] @page:paragraph/section`。
+3. 图表锚点只写题注与页面位置；图内数值不解析。
+4. `verified_quote_hit` 为 true 时，quote 必须可在原文定位；为 false 时进入 `pending_human[]`。
+5. `not_found_in_extracted_text` 表示“提取不到”，不等于原文未报告；`not_reported_in_source` 才是原文未报告。两者不可混用。
+6. 所有数字、单位、条件只保留原文字符串，不做单位换算或统计推断。
+
+---
+
+## 8. 任务适配与优先级
+
+1. 先完成 task.md 明确要求的主任务；默认任务同时输出结构化论文笔记、论文卡片、图表锚点与 claims 表。
+2. 如果 task.md 侧重问答/翻译/提取，则：
+   - 在 `notes.md` 第一段给出直接答案；
+   - 在 `result.json` 顶层和 `output_contract` 中写同一答案；
+   - 每条答案都带 `[S#]` 锚点。
+3. 如果 task.md 要求“知识点提取/可检索条目”，按术语、变量、方法、结论拆条，处理缩写与同义表达，避免重复。
+4. 如果 task.md 要求“结果复核与复用”，在 `notes.md` 中标注“机器可判 / 人工确认”两类字段，并把人工项放入 `pending_human[]`。
+
+---
+
+## 9. 异常处理与隐藏案例鲁棒性
+
+| 情况 | 检测 | 处置 | status |
 |---|---|---|---|
-| 扫描/图片 PDF | 字符少、质量 `low_text`/`garbled` | 保留空页文本，写 `degradations[]`，建议 OCR；不编造内容 | `partial`/`insufficient_evidence` |
-| 加密 PDF | `/Encrypt` | `PdfError`，跳过该文件，记 `errors[]` | `partial` |
-| 双栏错序 | 文本量正常但句序异常 | 不猜测重排，`uncertainty[]` 提示人工核对 | `partial` |
-| 无标题 | `headings_found < 2` | 退化单章 `S1 Full text`，加 `headings_not_detected` | `partial` |
-| 图表为主 | 页字符 <120 | `uncertainty[]` 列低文本页；图元素不读取 | 不影响全局 |
+| 正常论文 | 文本量充足、有标题 | 完整章节笔记 + 论文卡片 + claims | `ok` |
+| 无标题/少标题 | headings < 2 | 退化单章 `S1 Full text`，加 `headings_not_detected` | `partial` |
+| 扫描/图片 PDF | 字符少、quality=low_text/garbled | 保留空文本，写 `degradations[]`，建议 OCR，不编造 | `partial` 或 `insufficient_evidence` |
+| 加密 PDF | `/Encrypt` | 跳过该文件，记 `errors[]` | `partial` |
+| 双栏错序 | 句序异常 | 不猜测重排，`uncertainty[]` 提示人工核对 | `partial` |
+| 图表为主 | 页字符 < 120 | `uncertainty[]` 列低文本页；图元素不解析 | `partial` |
+| 超长文 | 文本量过大 | 优先标题、摘要、结果、局限；其余标 `deferred` | `partial` |
+| 非中文论文 | 语言非中文 | 保留原语言 quote，必要时在 statement 做翻译，注明原文语言 | `ok` 或 `partial` |
 | 材料缺失/坏 JSON | 无 case、无材料、JSON 解析失败 | 记 `input_error`、缺口清单，继续生成合法空 result | `input_error` |
 | 格式不支持 | 未识别扩展名/文件头 | 标记 `unsupported_format`，不强行解析 | `partial` |
-| 超时/预算耗尽 | 时间将尽 | 保留当前 partial，写 `limits[]`，退出码 0 | `partial` |
-| 契约缺失 | `output_contract` 不存在 | 按本文件 §4 生成默认 result，注明 `contract_missing` | `partial` |
+| 契约缺失 | 无 output_contract | 按本文件 §5 默认输出，注明 `contract_missing` | `partial` |
+| 预算耗尽 | 时间将尽或请求将尽 | 保留当前 partial，写 `limits[]`，退出码 0 | `partial` |
 
-任何情况下都要产出合法 `result.json`（含 `case_id` 若可得、`status`、`errors[]`、`degradations[]`、`pending_human[]`），退出码 0。
+任何情况下 `/app/output/result.json` 必须合法，并且包含可得 case_id、真实 status、`errors[]`、`degradations[]`、`pending_human[]`。
 
 ---
 
-## 8. Rubric 维度 → 交付要求 → 自证方式
+## 10. Rubric 得分动作清单
 
-| 评分维度/分值 | 交付要求 | 自证方式 |
-|---|---|---|
-| 实际效果 40：任务完成度 15 | 按论文自身章节对齐的逐章笔记，非通篇摘要；覆盖研究问题、数据、方法、结果、结论、局限 | `section_notes[]` 与 `notes.md` 中逐章标注 `section_id`、标题、
+### 实际效果 40 分
+
+- 任务完成度 15：逐章笔记按论文原有顺序；不只输出通读摘要；每章有 `purpose/methods/results/conclusions/limitations` 中可获取部分。
+- 结果正确性 15：每条论断与 quote、数字、变量、方法条件一致；anchor 指向真正对应位置。
+- 结果完整性 5：覆盖研究问题、数据、方法、主要发现、结论、局限性 6 大要素；缺的写 gaps。
+- 结果可核验性 5：每个关键结论都能按 locator 回到原文；`verify_report.json` 显示 quote 命中。
+
+### 使用增益 25 分
+
+- 质量增益 15：保存 `/app/work/baseline` 与 final `/app/output`；在 `changes[]` 记录 Agent 增强项；不允许最终产物退回通用摘要。
+- 效率增益 5：单命令完成 init→build→selfcheck；无 draft 时确定性兜底也产出完整交付。
+- 增益可验证性 5：`changes[]` + `runtime` + `verify_report.json` 证明“从基线到最终”的实际改进，不写未运行的对比分数。
+
+### 创新增益 15 分
+
+- 新增能力 5：章节对齐、字段化卡片、claims 表、锚点回链，不是普通摘要。
+- 方法改进 5：用 init 台账来源编号、候选抽取、冲突分组；用 draft.json 分离 Agent 判断与脚本构建。
+- 创新证据 5：在 `notes.md` 方法说明和 `verify_report.json` 中写清“本包相对于通用摘要的边界”。
+
+### 可靠体验 10 分
+
+- 调用易用 3：单命令入口明确，输入输出说明清楚。
+- 运行稳定 4：重复运行可复现；失败也 exit 0。
+- 异常处理 3：§9 的异常表完整，且真实记入 result.json。
+
+### 生态贡献 10 分
+
+- 文档完整 3：SKILL.md 写清用途、适用条件、调用方式、输入输出、异常处理。
+- 资源可复用 4：使用已有 `references/rules.json`、`references/schema.md`、`references/notes_template.md`，不要新增未说明路径。
+- 分享价值 3：交付可复现产物与 `claims.csv`，可作为他人继续加工笔记的基础。
+
+---
+
+## 11. 最终自检清单
+
+结束前逐项确认：
+
+1. `/app/output/result.json` 合法 JSON，UTF-8，退出码 0。
+2. 顶层含 `case_id`、`status`、`sources`、`claims`、`paper_card`、`section_notes`、`figures`、`gaps`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`coverage`、`runtime`。
+3. 嵌套 `output_contract` 回显原契约全部字段；未知字段保留，不删除。
+4. `/app/output/notes.md` 存在，且按章节顺序组织；每条关键结论有 `[S#]` 锚点。
+5. `/app/output/claims.csv` 存在，与 result.json 的 claims 对齐。
+6. `/app/output/verify_report.json` 存在，含 pass/fail、quote 命中、文件清单。
+7. 无证据字段写 `not_found_in_extracted_text`，不确定项在 `uncertainty[]`，人工动作在 `pending_human[]`。
+8. 没有自造 benchmark 分数、golden_standard、未运行对比结果或编造论文数据。
+9. 若生成 Office/幻灯片/图形，预览 PDF/PNG 已渲染。
+10. `changes[]` 中记录 `baseline_generated`、`draft_written` 或 `auto_extract_fallback`、`finalized`。
+
+---
+
+## 12. 最小调用示例
+
+示例输入：
+
+```text
+/input/case.json
+/input/task.md
+/input/paper.pdf
+```
+
+示例调用：
+
+```bash
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
+```
+
+示例输出结构：
+
+```text
+/app/output/result.json
+/app/output/notes.md
+/app/output/claims.csv
+/app/output/verify_report.json
+```
+
+示意输出字段：
+
+```json
+{
+  "case_id": "case-001",
+  "status": "partial",
+  "sources": [],
+  "claims": [],
+  "paper_card": {},
+  "section_notes": [],
+  "figures": [],
+  "gaps": [],
+  "uncertainty": [],
+  "pending_human": [],
+  "errors": [],
+  "degradations": ["AUTO_EXTRACT"],
+  "changes": ["baseline_generated", "auto_extract_fallback", "finalized"],
+  "coverage": {},
+  "runtime": {},
+  "output_contract": {}
+}
+```
+
+示意输出仅为说明接口，不代表正式案例结果。

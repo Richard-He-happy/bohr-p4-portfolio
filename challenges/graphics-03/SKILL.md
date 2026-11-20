@@ -1,146 +1,350 @@
 ---
 name: bio-mechanism-figure
-description: 把机制材料（工单、论文段落、数据表）转成可追溯、可编辑的生物学机制图/通路图：分层 SVG + 单页矢量 PDF/PNG 预览 + content_map + compliance_checks + 来源/变更/不确定性记录 + result.json（原 output_contract 全字段）。Agent 亲自读材料并写 plan.json（实体/关系/证据/区室），脚本只做索引、逐字校验、渲染与可核验资产生成。先跑本包基线产出全套交付物并保留，再增量增强；任何情况下 result.json 合法且退出码 0。Use when the task asks for a biological mechanism diagram, pathway figure, signalling schematic, graphical abstract of a mechanism, or a source-preserving edit of one.
-version: 3.0.0
+description: 把机制材料（论文段落、figure workorder、图表数据、已有 SVG/PDF）转成可追溯、可编辑、可复核的生物机制图/通路图：分层可编辑 SVG、真实渲染 PNG/PDF 预览、content_map、compliance_checks、来源与变更记录、result.json（原 output_contract 全字段并双回显）。优先单命令全流程；无 Agent draft 时脚本确定性兜底，仍产出完整产物。任何情况下 result.json 合法且退出码 0。Use when the task asks for a biological mechanism diagram, pathway figure, signalling schematic, source-preserving figure edit, or chart/mechanism figure generation.
+version: 4.0.0
 ---
 
-# 生物机制图与通路图（Agent 主导，完整性优先 v3）
+# 生物机制图与通路图：可编辑、可追溯、可复核
 
-## 0. 头部声明与最高优先级
+## 0. 最高优先级规则（先读，不可违背）
 
-**用途**：把输入材料中明确写出的生物机制、通路、实体关系与数据编码，做成一张可编辑、可回溯、可独立复核的机制图：分层 SVG 源文件、真实渲染的单页矢量 PDF/PNG 预览、逐元素来源映射（content_map）、合规检查（compliance_checks）、金标准/diff/version/self-check/run.log 资产，以及包含 `output_contract` 全部字段的 `result.json`。
+1. **只读事实材料**：必须真实解析 `/input` 下的 `case.json`、`task.md`、PDF/DOCX/CSV/JSON/SVG/PNG 及工作单中指定的原文、原始图、数据文件。不得依据文件名或领域标签推测内容，不得补造缺失科学数据。
+2. **单命令全流程优先**：进入任务后先运行本包 `run` 命令。它内部完成 init → build → selfcheck，产出全套基线交付物。不可跳过基线。
+3. **双路径但同一契约**：
+   - Agent 路径：读取台账与原文，把生物学判断写入 `/app/work/plan.json`（本包的 draft），再 `check`、`build`。
+   - 无 `plan.json` 时：脚本必须用 init 台账确定性抽取、逐字引用和 locator，生成实质工作稿并渲染全部产物，同时把 `AUTO_EXTRACT` 写入 `degradations`。
+   - 两条路径必须产出同一套文件与同一份 `result.json` 契约。
+4. **不手改结构化 JSON 框架**：`result.json`、`content_map.json`、`compliance_checks.json` 等结构化字段由脚本生成或更新。Agent 可写 `plan.json`、`agent_review.json` 等核验记录，但不得删除/重命名契约字段。脚本不可用时才允许手写最小合法 `result.json`，并保留已产出文件。
+5. **完整性优先**：基线产物只增强、不删除。先落盘全套产物，再做增量审校。不得为了“干净”删除部分产物。
+6. **退出码恒为 0**：脚本命令失败、材料缺失、导出失败等都必须被记录；最终返回合法 `result.json`，主流程不得以非 0 退出。
+7. **科学语义判断优先于逐字引文通过**：逐字 quote/locator 是必要条件，不是充分条件。还要判断实体类型、箭头语义、通路方向、区室、图例与图形是否一致；不确定就写 `pending_human`，不要硬判。
 
-**脚本只是工具**：最终交付物由你（Harness Agent）亲自读材料、推导、撰写/制作。脚本 `scripts/main.py` 与 `scripts/render.py` 只提供材料索引、逐字引用校验、确定性渲染与可核验资产生成；它们不做生物学判断，不能把脚本骨架/模板直接当成品。
+---
 
-**完整性优先（v6 混合策略，最高优先级）**：
-1. 进入任务后，**立即运行本包基线主流程**，产出全套基线交付物（所有 `output_contract` 字段、所有题面要求文件、所有 `result.json` 字段）。
-2. **保留全部基线产物**：后续校验与改写只能在基线上增强；**不得删除、清空或遗漏任何基线与契约字段**；若不确定，保留原产物并在 `result.json` 标注 `reviewed_by_agent=true`。
-3. **提交前必做完整性自检**：逐项核对「`output_contract` 字段列表 × 磁盘文件 × `result.json` 键」三者一一对应；缺任何一项先补齐再收尾；`partial` 状态必须列出缺失项。
-4. **可核验增强**：在基线产物之上，由 Agent 亲自核验关键论断/数字/引用的来源一致性，把核验结果写进 `result.json`（`verified` / `pending_human` / `conflicts`），这才是“genuinely-derived”的证据。
+## 1. 入口命令与目录
 
-## 1. 运行契约与目录
+### 1.1 单命令首选入口
 
-- 安装位置：`/skills/weekly-skill`；下文命令用 `SKILL_DIR=/skills/weekly-skill`。若实际路径不同，用实际路径。
-- 输入：`/input/case.json`、`/input/task.md` 及题面规定的材料（PDF/DOCX/CSV/图片/JSON/MD 等）。**必须真实解析材料内容**，不得依据文件名或领域标签猜测/补造内容。用 `scripts/main.py show` 提取并阅读原文；PDF/DOCX 用标准库提取文本层。
-- 工作目录：`/app/work`；最终产物：`/app/output`。
-- 主产物：`figure.svg`（可编辑源）、`figure.pdf`（真实单页矢量导出/预览，如可能附 `figure.png`）、`content_map.json`、`compliance_checks.json`、`plan.normalized.json`、`result.json`。
-- 可核验资产（同一次 build 产出）：`golden_standard.json`、`diff_report.md`、`version_history.md`、`self_check.json`、`run.log`。
-- `result.json` 要求：原样回填 `case.json` 里 `output_contract` 的**全部字段**（键名不改、不遗漏；缺值用 `null` 或 `[]`），另带 `case_id`、`status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`，以及文件指针与摘要：`golden_standard`、`diff_report`、`version_history`、`self_check`。
-- 调用约定：`python3 -B $SKILL_DIR/scripts/main.py <子命令> --input /input --output /app/output --work /app/work`。脚本不依赖 CWD，纯标准库，不联网，`--help` 退出码 0。
-- 异常处理：所有异常捕获进 `errors`/`degradations`；脚本命令失败必须被记录，最终 `result.json` 合法且退出码恒为 0。
+```bash
+python3 -B /skills/weekly-skill/scripts/main.py run \
+  --input /input \
+  --output /app/output \
+  --work /app/work
+```
 
-## 2. 专属执行流程（编号步骤）
+`run` 应等价完成：
 
-> 先跑基线，再真实解析，再增量增强。每步可重入；任何步骤失败不得中断最终产出。
+- **init**：盘点 `/input` 全部材料，给来源编号 `S1..Sn`，生成台账、候选实体/关系词组、冲突分组。
+- **build**：校验 `plan.json`/工作单；缺失时确定性兜底抽取；渲染全部可编辑源文件与导出件；生成 `content_map`、`compliance_checks`、来源记录、变更记录、`result.json`。
+- **selfcheck**：按第 7 节清单核对产物与契约，写 `self_check.json`。
 
-### 步骤 0：初始化与基线落盘（必须先做）
-- **输入**：`/input/case.json`、`/input/task.md`、输出/工作目录。
-- **动作**：
-  - 先运行 `init`：生成材料清单与合法 partial `result.json`。
-  - 立即运行 `build`（即使 `/app/work/plan.json` 尚未写好，脚本会用确定性兜底产出最小但完整的全套基线）：
-    ```bash
-    python3 -B $SKILL_DIR/scripts/main.py init  --input /input --output /app/output --work /app/work
-    python3 -B $SKILL_DIR/scripts/main.py build --input /input --output /app/output --work /app/work
-    ```
-  - 检查 `/app/output` 下是否已有全套基线文件。已存在的文件保留，后续只覆盖增强，不删除。
-- **输出**：全套基线交付物（SVG/PDF、content_map、compliance_checks、plan.normalized、golden_standard、diff_report、version_history、self_check、run.log、result.json）。若 `plan.json` 缺失，这些产物标记为脚本兜底，`status=partial`。
-- **失败分支**：命令失败或磁盘不可写 → 创建最小合法 `result.json`，记录 `errors`/`degradations`，列出已存在文件，退出码 0；如果脚本完全不可用，Agent 手写最小 `result.json` 并保留已有文件，绝不能因异常而无产出。
+### 1.2 如 `run` 不存在，使用等效降级命令
 
-### 步骤 1：盘点输入与真实解析材料
-- **输入**：`/input` 下所有文件、步骤 0 的材料清单。
-- **动作**：
-  - 读 `/input/case.json` 与 `/input/task.md`，提取 `case_id`、`output_contract`、任务类型、材料路径。
-  - 用 `show` 命令查看材料切块与 locator，例如：
-    ```bash
-    python3 -B $SKILL_DIR/scripts/main.py show --doc note --locator para3
-    python3 -B $SKILL_DIR/scripts/main.py show --doc figure03 --locator stream7
-    ```
-  - **真实阅读**关键段落：机制描述、实体/关系句、数据/图例句子。PDF/DOCX 读取文本层；CSV/JSON 直接读。扫描 PDF/位图无法提取文本时，只列出缺口，不 OCR 编造。
-  - 每一步记录 `locator` 与原文 quote 草稿。
-- **输出**：已读原文切片与定位、材料缺口清单、数据编码线索。
-- **失败分支**：材料缺失/损坏/格式不支持 → 在 `gaps`/`degradations` 中写明“无法解析的路径/原因”，继续后续步骤；不允许按文件名或领域标签猜内容。
+```bash
+python3 -B /skills/weekly-skill/scripts/main.py init --input /input --output /app/output --work /app/work
+python3 -B /skills/weekly-skill/scripts/main.py build --input /input --output /app/output --work /app/work
+python3 -B /skills/weekly-skill/scripts/main.py selftest --output /app/output --work /app/work
+```
 
-### 步骤 2：Agent 亲自推导并写 `plan.json`
-- **输入**：步骤 1 的原文切片、`references/plan-schema.md`。
-- **动作**：
-  - 读 `references/plan-schema.md` 了解 schema。
-  - 由你（Agent）在 `/app/work/plan.json` 写入：`title`、`compartments[]`（按上游→下游排序）、`entities[]`、`relations[]`、`data_encoding[]`、`gaps[]`。
-  - 每实体/关系必须带 `evidence.quote`（原文逐字切片，≥6 字符）与 `locator`；区室/方向来自原文语序；材料没写的用 `unspecified`，不要补造。
-  - 基因/蛋白/复合物/细胞类型/区室用原文写法，不擅自归一化合并。
-- **输出**：`/app/work/plan.json`。
-- **失败分支**：实体歧义、方向缺失、数据与文字矛盾 → 保留原文写法，`type` 用 `unspecified`，写入 `gaps`/`pending_human`；无法确定的不要当作事实。
+不要因为某个子命令缺失就中断任务；把降级方式写入 `degradations`。
 
-### 步骤 3：核对证据与工作单
-- **输入**：`/app/work/plan.json`、材料原文。
-- **动作**：
-  - 运行 `check`：逐字回验 `quote`，检查实体/关系是否缺 id/type/compartment，对照 workorder 声明条目。
-    ```bash
-    python3 -B $SKILL_DIR/scripts/main.py check --input /input --output /app/output --work /app/work
-    ```
-  - 若有 `rejected` 或 `issues`，修正 `plan.json` 中的引文/字段或标为未核验。
-- **输出**：`/app/work/check_report.json`；状态为 `CLEAN` 或 `rejected/uncertain` 列表。
-- **失败分支**：引文找不到 → 仍可继续 build，但标未核验并把整体状态降为 `partial`，写入 `uncertainty`/`counts.rejected_quotes`。
+- 安装位置：`/skills/weekly-skill`。若实际路径不同，使用实际路径。
+- 输入目录：`/input`，必须读取 `case.json`、`task.md` 及材料。
+- 工作目录：`/app/work`；最终交付目录：`/app/output`。
+- 纯标准库、离线、不依赖 CWD、`python3>=3.8`。所有命令可重入。
 
-### 步骤 4：重建增强产物（保留基线的条件下）
-- **输入**：修正后的 `plan.json`、基线产物。
-- **动作**：
-  - 再次运行 `build`。脚本会写出全套产物（覆盖增强见步骤 0）；基线文件不删除，只覆盖增强。
-  - 如需要可运行 `selftest` 做只验健壮性检查：
-    ```bash
-    python3 -B $SKILL_DIR/scripts/main.py build    --input /input --output /app/output --work /app/work
-    python3 -B $SKILL_DIR/scripts/main.py selftest --output /app/output --work /app/work
-    ```
-- **输出**：最终全套交付物与更新后的 `result.json`（含 `status/sources/uncertainty/changes` 等）。
-- **失败分支**：`build` 失败 → 回退到步骤 0 基线产物，在 `result.json` 中记录降级，不删除任何文件。
+---
 
-### 步骤 5：自检 rubric 并回填 `result.json`
-- **输入**：`/app/output` 全部文件、`/app/work/check_report.json`、`case.json.output_contract`。
-- **动作**：
-  - 对照第 5 节 rubric 表与第 6 节自检清单逐项核对。
-  - 检查「`output_contract` 字段 × 磁盘文件 × `result.json` 键」一一对应；缺值用 `null`/`[]` 并在 `exceptions` 说明。
-  - 把 Agent 核验结论写进 `result.json.verified`、`pending_human`、`conflicts`；把本轮全部变更写进 `changes`。
-  - 确认退出码 0。
-- **输出**：最终 `/app/output/result.json`（合法、诚实、完整）。
-- **失败分支**：字段缺失 → 先补 `null`/`[]` 并填写 `exceptions`；仍未达到完整标准则标 `status=partial` 并列出缺失项，退出码仍 0。
+## 2. 执行流程
 
-## 3. 预算策略（64 次模型请求 / 900 秒 / 单次 16384 tokens）
+### 步骤 0：先落盘完整基线
 
-- **必须做的步骤**：步骤 0（基线 init+build）→ 步骤 1（读关键材料）→ 步骤 2（Agent 写 plan）→ 步骤 3（check）→ 步骤 4（重建 build）→ 步骤 5（自检与回填）。这些构成完整闭环，不可跳过。
-- **可跳过或缩减**：版式美化、反复试错、过多 diff 人工推断；如时间不够，优先保证主产物、结果正确性与可核验性。
-- **请求分配建议**：
-  - 步骤 0：2–3 次（init + build + 检查产物清单）
-  - 步骤 1：10–20 次（用 `show` 读材料，优先读机制段/工单指令/图例或数据段；3–8 个核心实体与关系即可）
-  - 步骤 2：3–8 次（写 plan.json 可一次写入，留修订余量）
-  - 步骤 3：2–5 次（check + 修 quote）
-  - 步骤 4：2–5 次（build + selftest）
-  - 步骤 5：2–4 次（自检 + 回填 result）
-  - 预留约 25–30% 余量处理歧义、rebuild、异常恢复。
-- **时间阈值**：超过约 780 秒或约 50 次模型请求仍未完成时，立即保存当前最完整产物，运行 `build` 或保留基线，写 honest partial `result.json`，不要继续循环。
-- **落盘策略**：最早在步骤 0 落盘全套基线，后面每次成功增强都更新 output；不要等到最后一次性写。
+无论材料是否读得懂、工作单是否齐全，先执行：
 
-## 4. 隐藏案例鲁棒性与降级
+```bash
+python3 -B /skills/weekly-skill/scripts/main.py run --input /input --output /app/output --work /app/work
+```
 
-任何情况下都要产出合法 `result.json` 且退出码 0。无法判断的写进 `pending_human` 并说明需要人确认什么。
+若 `run` 不可用，执行 `init` + `build`。
 
-| 情况 | 行为 | 落点 |
+检查 `/app/output` 至少出现：
+
+- `figure.svg`
+- `figure.pdf`
+- `figure.png`（若无位图渲染器，则记录降级，并以 PDF 作为检视件）
+- `content_map.json`
+- `compliance_checks.json`
+- `result.json`
+- `diff_report.md`
+- `golden_standard.json`
+- `version_history.md`
+- `self_check.json`
+- `run.log`
+
+已有文件保留；后续只覆盖增强，不删除。
+
+失败分支：磁盘不可写或脚本完全不可用 → 写最小合法 `result.json`，列出已存在文件与错误，退出码 0。
+
+### 步骤 1：盘点输入与真实阅读
+
+- 读 `/input/case.json`，提取 `case_id`、`output_contract`、任务类型、材料路径。
+- 读 `/input/task.md`，识别要画什么、导出什么、可编辑源有什么要求。
+- 若有 `artifacts/figure-workorder.json`，逐条读取工作单中的实体、边、图例、导出约束。
+- 用 `show` 命令查看材料切片：
+
+```bash
+python3 -B /skills/weekly-skill/scripts/main.py show --doc note --locator para3
+python3 -B /skills/weekly-skill/scripts/main.py show --doc figure03 --locator stream7
+```
+
+- 对 PDF/DOCX 读取文本层；CSV/JSON 直接解析；SVG/PNG 检查实际图面而不只读文件名。
+- 无文本层或无法解析的，列入 `gaps`/`degradations`，禁止用 OCR 幻觉补造。如果环境明确有 OCR，可尝试但必须标 `uncertainty`。
+- 记下每个机制判断对应的 `locator` 和原文 quote 草稿。
+
+### 步骤 2：Agent 写 draft/plan
+
+Agent 在 `/app/work/plan.json` 中写入判断。schema 见 `references/plan-schema.md`。关键字段必须包含：
+
+- `title`
+- `source_scope`：哪个来源、哪个图、哪段材料
+- `compartments[]`：按上游→下游排放；跨膜、胞内、核内位置根据原文；未说明则 `unspecified`
+- `entities[]`：
+  - `id`
+  - `label`（原文写法，保留基因/蛋白/复合物/细胞类型/区室区分）
+  - `kind`：`gene` / `protein` / `complex` / `cell_type` / `compartment` / `small_molecule` / `other`
+  - `name_style_from_source`
+  - `compartment`
+  - `evidence.quote`：原文逐字片段 ≥ 6 字符
+  - `evidence.locator`
+  - `confidence`
+- `relations[]`：
+  - `id`
+  - `source` / `target`
+  - `type`：`activation` / `inhibition` / `binding` / `modification` / `translocation` / `unspecified`
+  - `direction`
+  - `arrow_style`
+  - `evidence.quote`
+  - `evidence.locator`
+  - `confidence`
+- `data_encoding[]`：颜色、线宽、节点大小/形状到表达量、显著性、置信度、时间点等的映射依据
+- `legend[]`
+- `gaps[]`
+- `pending_human[]`
+
+材料没写的，不要编造。实体歧义时保留原文写法，用 `kind_basis=not_stated` 区分，不要强行归一化。
+
+### 步骤 3：核验
+
+运行：
+
+```bash
+python3 -B /skills/weekly-skill/scripts/main.py check --input /input --output /app/output --work /app/work
+```
+
+核验点：
+
+- 每个 `quote` 必须能定位到来源文本或工作单。
+- 实体/关系不缺少必要语义字段。
+- 通路方向与区室不违背原文。
+- workorder 声明的条目是否覆盖。
+- 图例映射是否有依据。
+
+若 `check` 出现 `rejected`，Agent 应修正 `plan.json` 中的 quote/locator/类型，或把该项标为 `uncertain`；不得静默删除。
+
+### 步骤 4：重建增强产物
+
+```bash
+python3 -B /skills/weekly-skill/scripts/main.py build --input /input --output /app/output --work /app/work
+python3 -B /skills/weekly-skill/scripts/main.py selftest --output /app/output --work /app/work
+```
+
+`build` 必须：
+
+- 渲染分层、命名清晰、字体可替换的 `figure.svg`。
+- 生成真实 `figure.pdf` 与 `figure.png` 预览；若 PNG 不可生成，记录原因。
+- 生成 `content_map.json`：每个关键实体、边、图例项、数据编码都带 `[S#]` 与 `文件#行号/段落号`。
+- 生成 `compliance_checks.json`：检查实体类型、箭头语义、方向、区室、图例、导出格式、可编辑性、PDF/PNG 可打开性。
+- 生成 `/app/output/result.json`，见第 3 节。
+- 若输入是“编辑已有图”，保留原图来源，生成修改后版本，并在 `version_history.md` 中写清变更点。
+
+### 步骤 5：最终自检与回填
+
+- 对照第 7 节自检清单逐项核对。
+- 核对「`output_contract` 字段 × 磁盘文件 × `result.json` 键」一一对应。
+- Agent 的逐条核验结论写入 `agent_review.json` 或 `result.json.verified`。
+- 无法确认的写入 `uncertainty`/`pending_human`。
+- 本轮变更写入 `changes`。
+- 所有异常写入 `errors`/`degradations`。
+- 最终保证 `/app/output/result.json` 合法、诚实、完整，退出码 0。
+
+---
+
+## 3. result.json 契约
+
+### 3.1 必须包含原 `output_contract` 全字段
+
+从 `case.json` 中读取 `output_contract`，逐项回填。若缺失，至少保证：
+
+```json
+{
+  "case_id": "...",
+  "status": "complete|partial|empty|input_error|export_error|fallback",
+  "editable_source": {},
+  "export_artifact": {},
+  "content_map": {},
+  "compliance_checks": {},
+  "exceptions": []
+}
+```
+
+键名不得更改、不得遗漏；缺值用 `null` 或 `[]`，并在 `exceptions` 说明。
+
+### 3.2 双回显
+
+`case_id` 与所有 `output_contract` 字段必须在 `result.json` 顶层和 `output_contract` 嵌套对象中各出现一次。例如：
+
+```json
+{
+  "case_id": "SYN-FIGURE",
+  "status": "complete",
+  "editable_source": { "file": "figure.svg", "layers": true },
+  "export_artifact": { "files": ["figure.pdf", "figure.png"] },
+  "content_map": { "file": "content_map.json" },
+  "compliance_checks": { "file": "compliance_checks.json" },
+  "exceptions": [],
+  "output_contract": {
+    "case_id": "SYN-FIGURE",
+    "status": "complete",
+    "editable_source": { "file": "figure.svg", "layers": true },
+    "export_artifact": { "files": ["figure.pdf", "figure.png"] },
+    "content_map": { "file": "content_map.json" },
+    "compliance_checks": { "file": "compliance_checks.json" },
+    "exceptions": []
+  }
+}
+```
+
+### 3.3 诚实状态附加字段
+
+还必须包含：
+
+- `sources`：来源清单、来源编号、文件路径、版本/页/段落范围。
+- `uncertainty`：方向不明、实体歧义、数据不足等。
+- `pending_human`：需要人工确认的科学判断。
+- `errors`：命令失败、解析失败、导出失败等。
+- `degradations`：AUTO_EXTRACT、缺少 plan、PNG 缺失、PDF 字体问题、OCR 不可用等。
+- `changes`：Agent 增强、重描、修订、降级。
+- `runtime`：init/build/selftest 的耗时、子命令状态。
+- `verified`：Agent 核验结论。
+- `conflicts`：材料之间不一致。
+
+---
+
+## 4. 科学绘图规则
+
+### 4.1 实体命名
+
+- 基因、蛋白、复合物、家族成员、细胞类型、亚细胞区室必须分开。
+- 保留材料原文写法；若原文同时出现同义名/旧名，不擅自合并，可在 `content_map` 中登记同义候选。
+- 物种前缀、修饰状态（如磷酸化）不丢失。
+- 同名基因与蛋白不混用；材料未写的一律 `unspecified`，不得判成确定类型。
+
+### 4.2 关系语义到图元
+
+关系必须可区分，不得把所有箭头画成同一样式：
+
+- `activation`：实心箭头。
+- `inhibition`：T-bar/平头抑制线。
+- `binding`：无箭头连接线或端点圆点。
+- `modification`：如磷酸化、泛素化；用不同端点标记/线型并写进图例。
+- `translocation`：虚线或开放箭头，明确起止区室。
+- `unspecified`：用中灰线，并写进 `pending_human`。
+
+### 4.3 方向与区室
+
+- 通路方向必须按原文上下游顺序，不能自动把名词平铺成圆环。
+- 受体在膜上、膜外/膜内位置要依据来源；跨膜受体不得画在胞内或膜内。
+- 分支、反馈环、并行通路必须显式保留。
+- 有冲突的证据：保留并写 `conflicts`，不人为消除。
+
+### 4.4 图例与数据编码
+
+- 颜色、线宽、节点大小/形状、虚线实线都要有图例。
+- 图例必须从材料或工作单找到依据；没有依据就标 `unspecified`。
+- 图面配色/线宽必须与图例一致，不能出现图例说红色=抑制、图面却用红色=激活。
+- 图表数据映射（如表达量、显著值）必须回源到数据行。
+
+### 4.5 可编辑源文件
+
+- `figure.svg` 必须分层，给出稳定 `id`，标签可改，字体可替换。
+- SVG 不能用扁平路径伪装成可编辑科研图；应保留文本节点、组、边、端点标记。
+- 不允许只输出位图截图。
+
+---
+
+## 5. 异常与鲁棒性
+
+| 情况 | 处置 | 落点 |
 |---|---|---|
-| `case.json` 缺失/坏 JSON | 抢救 `case_id`/`output_contract`，继续跑 | `errors`、`status=partial/input_error` |
-| `output_contract` 缺失 | 至少保证 `case_id,status,editable_source,export_artifact,content_map,compliance_checks,exceptions` 字段；缺值 `null`/`[]` | `exceptions` |
-| 材料缺失/损坏/格式不支持 | 列出缺口，不猜内容，能跑多少跑多少 | `gaps`、`degradations` |
-| 扫描 PDF/位图无文本层 | 不进正文，只列缺口；如环境有 OCR 可尝试并注明不确定性，没有则放弃 | `gaps`、`pending_human` |
-| 无 `plan.json` | 由 `build` 用确定性兜底（工单条目→语义句挖掘→材料清单）产出最小完整图 | `degradations`、`subtitle` |
-| 引文找不到/check 不 CLEAN | 仍出图，标未核验，整体 partial | `uncertainty`、`counts.rejected_quotes` |
-| 金标准为空/无 workorder | 不补造实体，说明缺口 | `golden_standard.gaps`、`pending_human` |
-| diff 有缺失/偏差 | 图仍出，降 partial，动作逐条列出 | `diff_report.md` §5、`result.diff_report.actions` |
-| 实体歧义（基因/蛋白同名） | 保留原文写法，用 `kind` 区分，不合并 | `gaps`、`kind_basis=not_stated` |
-| PDF 非拉丁字符丢字 | SVG 保留原文，PDF 丢字并计数 | `compliance_checks.pdf.chars_dropped_for_winansi` |
-| 无位图渲染器 | 不出 PNG，用 PDF 作检视件 | `raster_preview`、`degradations` |
-| 超时/接近预算 | 立即保存当前产物，运行 `build` 收尾，状态诚实标注 | `status=partial`、`runtime` |
-| 空输入 | 生成空图或最小占位图，`status=empty/partial`，不编造 | `status`、`exceptions` |
-| 探针子进程失败 | 记 `pass=false`，不中断主流程 | `self_check.fallback`、`verdict.failures` |
+| `case.json` 缺失或坏 JSON | 抢救 `case_id`/`output_contract`，继续跑 | `errors`, `status=input_error` |
+| `output_contract` 缺失 | 至少回填第 3.1 节字段 | `exceptions` |
+| 材料缺失/损坏/不支持 | 列出缺口，不猜内容 | `gaps`, `degradations` |
+| 扫描 PDF 无文本层 | 不清洗不编造；有 OCR 可试并标不确定性，没有则放弃 | `gaps`, `pending_human` |
+| 无 `plan.json` | `build` 用确定性兜底抽取实体/关系 | `degradations` |
+| `quote` 无法逐字匹配 | 仍出图，标未核验，状态降级 | `uncertainty`, `counts.rejected_quotes` |
+| 实体歧义、方向缺失 | 保留原文写法，标 `unspecified` | `gaps`, `pending_human` |
+| 图面元素过多 | 按来源优先级降噪，保留关键机制主干 | `compliance_checks` |
+| PDF 字体丢失/非拉丁字符 | SVG 保留原文；PDF 丢字计数 | `compliance_checks.pdf` |
+| 无 PNG 渲染器 | 用 PDF 作检视件，出不 PNG | `raster_preview`, `degradations` |
+| 编辑已有图但来源不可解析 | 保留原来源文件，列出不可改动点 | `version_history.md`, `degradations` |
+| 超时/逼近预算 | 立即保存当前产物，运行 build/selftest 收尾 | `runtime`, `status=partial` |
+| 子进程失败 | 记录 `pass=false`，继续主流程 | `self_check.fallback`, `errors` |
 
-## 5. rubric 维度 → 交付要求 → 自证方式
+---
 
-| rubric 维度 | 交付要求 | 自证方式 |
-|---|---|---|
-| **实际效果（任务完成度 15 / 正确性 15 / 完整性 5 / 可核验性 5）** | 完成“读机制材料—定实体与关系—定布局与图例—出源文件与导出件”完整闭环；实体类型（基因/蛋白/复合物/细胞/区室）不混用；相互作用类型（激活/抑制/结合/修饰/转运）可区分；通路方向与数据编码与输入一致；覆盖工作单要求的实体、分支、反馈环
+## 6. 预算策略
+
+官方预算：64 次模型请求 / 900 秒 / 单次 16384 tokens。
+
+建议分配：
+
+- 步骤 0 基线 `run`/`init+build`：2–4 次。
+- 步骤 1 读材料，优先读工单、机制段、图例/数据段：10–20 次。
+- 步骤 2 写 `plan.json`：3–8 次。
+- 步骤 3 `check` + 修 quote：2–5 次。
+- 步骤 4 `build` + `selftest`：2–5 次。
+- 步骤 5 自检与回填：2–4 次。
+
+保留约 25–30% 余量处理歧义、rebuild、异常恢复。
+
+超过约 780 秒或约 50 次请求仍未完成时：立即保存当前最完整产物，运行 `build` 或保留基线，写诚实 `partial`，不要继续循环。最早在步骤 0 落盘全套基线，之后每次增强都更新 `/app/output`。
+
+---
+
+## 7. 自检清单
+
+每次收尾前逐项确认：
+
+1. `figure.svg` 存在，打开后实体、边、图例可编辑；文本不是全部转路径。
+2. `figure.pdf` 存在且非零字节；`figure.png` 存在，或已记录无法生成的降级。
+3. `content_map.json` 覆盖每个关键实体、关系、图例项、数据映射，且都有 `[S#]` 与 locator。
+4. `compliance_checks.json` 包含实体类型、箭头语义、方向/区室、图例一致、导出件检查。
+5. `result.json` 合法 JSON，顶层与 `output_contract` 都包含原始字段与 `case_id`。
+6. `status` 诚实：完整则 `complete`，有缺口则 `partial`，输入坏则 `input_error`，导出坏则 `export_error`。
+7. `sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes` 均非空且描述可操作。
+8. `run.log`、`self_check.json`、`version_history.md` 存在且与当前产物一致。
+9. 没有伪造 `golden_standard`、分数、基准结果。
+10. 主流程退出码 0。
+
+---
+
+## 8. 必须避免
+
+- 不要只输出 PNG 位图或纯样式示意图。
+- 不要利用错误的领域标签补造机制内容。
+- 不要手改结构化 JSON 后掩盖原始字段。
+- 不要把“逐字引用通过”当作“科学绘图正确”。
+- 不要将基因/蛋白/复合物/细胞类型/区室混为一类。
+- 不要丢失反馈环、分支、抑制/激活差异。
+- 不要在没有来源时给颜色/线宽/节点大小赋予数据含义。
+- 不要因异常中断导致无 `/app/output/result.json` 或非 0 退出。

@@ -1,0 +1,9 @@
+name: python
+version: "3.10"
+runtime: python3
+packages: []
+python: ">=3.8"
+network: false
+resources:
+  - kind: cpu
+    cores: 1

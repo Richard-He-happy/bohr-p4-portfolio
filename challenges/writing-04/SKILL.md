@@ -1,192 +1,496 @@
 ---
 name: citation-manager
-description: 参考文献与引用管理 Skill。读取真实稿件与真实文献库（BibTeX / RIS / CSL-JSON / GB/T 7714 文本），完成论断级引用插入定位、顺序编码制编号连锁更新、文献去重归并（可解释判据）、GB/T 7714—2015 或 APA 7 格式转换、DOI 与元数据核验、正文—文献表一致性检查，产出可继续编辑的稿件、同步的文献表与逐条可回溯的 result.json。当用户要求“整理参考文献”“补插引用”“更新/重排编号”“文献去重合并”“改成 GB/T 7714 或 APA”“核对正文引用与文献表是否一致”时使用。
-version: 2.1.0
+description: 参考文献与引用管理 Skill。读取真实稿件与真实文献库（BibTeX / RIS / CSL-JSON / GB/T 7714 文本），完成论断级引用插入定位、顺序编码制编号连锁更新、文献去重归并（可解释判据）、GB/T 7714—2015 或 APA 7 格式转换、DOI 与元数据核验、正文—文献表一致性检查，产出可继续编辑的稿件、同步的文献表与逐条可回溯的 result.json。当用户要求“整理参考文献”“补插引用”“更新/重排编号”“文献去重合并”“改成 GB/T 7714 或 APA”“核对正文引用与文献表是否一致”时使用。脚本是工具，最终交付物由 Harness Agent 亲自读材料、推导、撰写/制作；不得将脚本骨架/模板直接当作成品。
+version: 3.0.0
 license: MIT
 entrypoint: scripts/main.py
-runtime: python3 >=3.9，仅标准库，无网络
+runtime: python3 >=3.8，仅标准库，离线
 ---
-
-## ★ Agent 修改边界（最高优先级，先读）
-
-本 Skill 的**结构化产物由脚本生成**；你（Agent）的职责是真实阅读材料、核验、补全文本型交付物，**不是重写结构化 JSON 的结构**。严格遵守：
-
-1. **禁止手改结构化产物**：`claims.json`、`evidence_table.json`、`result.json` 的结构字段（键名、claim_id、source_id、locator、quote、strength、support_scope、counts）**必须原样保留脚本输出**。不得用文本编辑覆盖这些文件。
-2. **允许 Agent 做的事**：
-   - 真实阅读 `/input` 材料，核验脚本抽取的 quote / locator / 数字是否与原文一致；
-   - 把核验结论写进 `agent_review.json`（新增文件：逐条列出 claim_id → 核验结果 verified/rejected/reason）以及 `pending_human.json` 的补充项；
-   - 亲自撰写/改写 **正文型交付物**（`deliverable.md` / `manuscript.md` 等），但每个数字、引用、论断必须能在 `evidence_table.json` 中找到依据；成稿不得删除契约要求的字段；
-   - 若发现脚本缺陷：写一个临时 python 调用脚本函数重算并覆盖（记录在 `agent_review.json` 的 `script_fixes`），**不得手工篡改 JSON**。
-3. **禁止生成无依据的评分/金标准**：不要自造 `golden_standard`、`diff_report`、加权自评分；核验只引用 `verify.py` 的真实输出 `verification.json`。若脚本已生成上述自设资产，**不要引用、不要美化**，在 `agent_review.json` 里说明其局限。
-4. **完整性自检**：结束前核对「output_contract 字段 × 磁盘文件 × result.json 键」三者一一对应；`deliverable.md` 与 `evidence_driven_draft.md` 如同时存在，两者内容必须不同（前者=干净成稿，后者=带证据标记草稿），不得复制粘贴同一文本。
-5. **预算**：先让脚本产出全套基线（通常 1–2 次调用即可），再把剩余请求用于逐条核验与成稿改进；接近 64 次/900 秒时立即收尾，保证 result.json 合法且 status 诚实。
 
 # citation-manager（写作04｜参考文献与引用管理）
 
-## 0. 最高优先级：谁为结果负责
+## 0. 核心规则（最高优先级）
 
-本 Skill 帮助 Harness Agent 完成“参考文献与引用管理”的实际案例。`scripts/main.py` 与 `scripts/reftool.py` 只是工具：它们负责确定性解析、编号、去重、渲染，产出基线。**最终交付物由你（Harness Agent）亲自阅读 `/input` 真实材料、逐条核验与推导、撰写或修正；脚本输出只是基线，禁止把脚本模板、示例结果或骨架直接当作成品。**
-
-你必须本着自己阅读材料、自己做判断的方式完成案例。任何引用插入、去重合并、字段补齐、格式转换、来源核验，都必须有原始材料证据；不允许根据文件名、领域标签或案例标题猜测内容，不允许补造 DOI、卷期页、作者、引用或分数。脚本能做的自动化动作可以信任但其结果仍要抽核；涉及 `weak_match`、`ambiguous_pairs`、`pending_human` 的项必须由你亲自复核。
-
-“完整优先”是最低要求：先得到全套基线交付物，再在其上增量增强；不得删除、清空或遗漏任何基线与契约字段。
-
----
-
-## 1. 用途与边界
-
-一次运行覆盖六类动作中的可自动化部分，并由 Agent 完成人工判断闭环：
-
-| 动作 | 工具实现 | Agent 必须补足的部分 | 主要产物 |
-|-|-|-|-|
-| A 引用插入与定位 | 识别缺来源的论断句，按题名+摘要词项覆盖率匹配文献库，句末插入编号 | 核对每条插入是否落在真正需要支撑的句子；排除整段末尾灌注 | `change_log` / `citation_map` |
-| B 编号连锁更新 | 按正文首次出现顺序重排 `[n]`，同步正文与文末列表；保留 `[3-5]`、`[1,3]`、`^[1]^` 等样式 | 检查编号连续性、交叉引用、上标一致性 | `manuscript.md` / `changes` |
-| C 文献去重归并 | DOI 精确 → 规范化题名相等 → 题名相似+同作者+年份接近；冲突进入 `ambiguous_pairs` | 解释每条合并或保留的判据，避免误合并同名作者不同文献 | `dedup_decisions` / `merge_groups` |
-| D 格式转换 | 统一条目模型 → GB/T 7714—2015 或 APA 7；保留 DOI、卷期页、类型标识 | 检查中英文混排、标点、字段占位 | `references_formatted.md` |
-| E 来源核验 | DOI 语法、重复 DOI、按类型缺字段、孤立引用、编号连续性、数字/单位保留 | 发现脚本未检出的异常；对可疑条目手动核对原稿 | `verification` |
-| F 论断–文献匹配 | 每条引用所在句与被引条目题名/摘要词项重叠，低重叠标 `weak_match` | 逐条复核低重叠项，决定接受、改写或 pending_human | `citation_map` |
-
-**不做**：不联网检索、不补造 DOI/卷期页/作者、不改写事实与结论、不臆造文献条目。所有条目只来自输入文献库或稿件自带的参考文献表。若题面要求需要网络检索，则公开说明无法执行并写 `limitations`，不伪造检索结果。
+1. **单命令全流程优先**：先执行一次主命令，让脚本完成 init → build → selfcheck 基线；随后你在其基础上做核验、修正、补全。
+2. **Agent-first**：你必须真实阅读 `/input` 原文与文献库，把你的判断写入 `/app/work/draft.json`，再让脚本按 draft 构建。不要把脚本自动抽取结果直接当作最终答案。
+3. **确定性兜底**：如果预算或时间不足、模型无法继续，脚本/工作流必须用 init 台账确定性抽取生成实质工作稿，并诚实记入 `gaps/degradations` 为 `AUTO_EXTRACT`。
+4. **完整性优先**：最终 `/app/output/result.json` 必须同时回显原始 `output_contract` 字段（顶层 + `output_contract` 嵌套各一次），包含 `case_id`。
+5. **不编造**：不得补造材料中不存在的文献、数字、元数据、benchmark 分数或软件状态。
+6. **永远退出码 0**：即使输入错误、脚本失败、材料缺失，也要产出合法 partial `result.json` 并退出 0。
 
 ---
 
-## 2. 适用条件
+## 1. 单命令入口
 
-- 稿件为 Markdown/TXT；`.docx` 会被抽取正文文本，但版式与上标样式可能丢失，需人工复核；含或不含文末参考文献表均可。
-- 文献库为 `.bib` / `.ris` / `.json`（CSL-JSON）或 GB/T 7714 文本列表。
-- 需要中文顺序编码制（GB/T 7714—2015）或英文 APA 7；其他规范需改 `references/styles.md` 的渲染规则，不在当前版本内。
-- `.xlsx` / `.csv` / `.enw` 文献库未内置解析器，会被记为 `degradations: unsupported_or_unrecognized_format`；此时请先导出为 RIS/CSL-JSON 再运行，或由 Agent 如实标注不支持。
-
----
-
-## 3. 运行契约
-
-- 输入：`/input/case.json` 与 `/input/task.md`，以及题面规定的材料（PDF/DOCX/CSV/图片等）。**必须真实解析材料内容**，不得依据文件名或领域标签猜测/补造内容。
-- 工作目录 `/app/work`；最终产物必须落在 `/app/output`；可编辑 Office/幻灯片/图形产物必须额外给出真实渲染的 PDF/PNG 预览（本 Skill 默认输出 Markdown，可直接编辑；若契约要求 .docx/.pptx 等，则用环境可用工具生成并渲染预览）。
-- 只用 Python 标准库；不联网；不依赖当前目录（资源路径基于 `__file__`）。
-- **退出码恒 0**；启动即写 partial `result.json`，结束时无条件 finalize 覆盖；任何异常写入 `errors`/`degradations`。
-- 必须包含 `result.json`，且包含原 `output_contract` 的**全部字段**（键名不改）与 `case_id`。
-- 若 `output_contract` 缺失，则以本 SKILL §7 列出的固定字段作为最小契约回填；无法满足的字段写 `null` 或 `[]` 并在 `uncertainty` 说明。
-
----
-
-## 4. 工具脚本调用方式
-
-从包目录运行：
+首选执行：
 
 ```bash
-cd /skills/weekly-skill
-python3 -B scripts/main.py --help
-python3 -B scripts/main.py                                   # /input -> /app/output, GB/T 7714
-python3 -B scripts/main.py --input /input --output /app/output --style apa
-python3 -B scripts/main.py --input ./caseA --output ./outA --no-insert   # 只出建议，不改稿
+python3 -B scripts/main.py run --input /input --output /app/output --work /app/work
 ```
 
-| 参数 | 说明 |
+该命令内部完成：
+
+- `init`：盘点 `/input` 全部材料，分配来源编号 `S1..Sn`，生成 `/app/work/input_manifest.json` 与 `/app/work/init_ledger.json`，抽取候选引用、条目、冲突分组。
+- `build`：校验或兜底抽取，生成全部产物：`manuscript.md`、`references_formatted.md`、`references.json`、`result.json`、`report.md` 等。
+- `selfcheck`：校验 JSON 合法性、产物存在性、契约字段覆盖、编号连续性、来源 locator 可回溯性。
+
+如果 `run` 子命令不可用或返回非零：
+
+1. 先运行 `python3 -B scripts/main.py --help` 确认当前入口。
+2. 使用兼容基线命令，例如：
+
+```bash
+python3 -B scripts/main.py --input /input --output /app/output --style gbt7714
+```
+
+3. 然后手动执行本文件第 8 节的自检流程，绝不因脚本非零退出而放弃。
+
+---
+
+## 2. 运行时契约
+
+| 项 | 路径 |
 |-|-|
-| `--input` | 输入目录，默认 `/input`；不存在时回退到 `/input`、包根同级 `input/` |
-| `--output` | 输出目录，默认 `/app/output`；不可写时回退 |
-| `--style` | `gbt7714`（默认）或 `apa` |
-| `--no-insert` | 只登记引用插入建议（`change_log.applied=false`），不修改稿件 |
-| `--version` | 打印版本 |
+| 输入目录 | `/input` |
+| 工作目录 | `/app/work` |
+| 最终输出目录 | `/app/output` |
+| 输入信息 | `/input/case.json`、`/input/task.md`、`/input/**` 材料 |
+| 文档规则 | `references/rules.md`、`references/styles.md`、`references/usage.md` |
+| 脚本 | `scripts/main.py`、`scripts/reftool.py` |
 
-脚本核心流程：
-
-`discover → 选稿件 → parse_library（逐文件容错）→ 去重归并 → 文末表↔库对齐 → 论断级插入 → 首现编号重排 → 渲染 → 校验 → 落盘 → 契约回填`
-
-输入发现与算法细节见 `references/rules.md`；格式字段映射见 `references/styles.md`；完整调用步骤、字段说明、限制见 `references/usage.md`。
-
----
-
-## 5. 本题专属执行流程（Harness Agent 必做）
-
-以下编号为执行顺序。每步都要落盘；不要等全部完成才写 `/app/output/result.json`。
-
-### 步骤 0：读取任务与输出契约（1–3 次模型请求）
-
-- 输入：`/input/task.md`、`/input/case.json`
-- 动作：读取 task.md 的题面约束与 case.json 的 `case_id`、`output_contract`、`task_instruction`、`organizer_workorder` 等字段。
-- 输出：在内存或 `/app/work/agent_checks.md` 中记录：`case_id`、预期交付物列表、要求风格（GB/T/APA）、需覆盖动作、输出字段。
-- 失败分支：`case.json` 缺失或坏 JSON → 记入 `errors`，继续从 `/input` 扫描材料；`output_contract` 缺失 → 用本 SKILL §7 字段兜底。
-
-### 步骤 1：盘点输入与材料（1–4 次模型请求）
-
-- 输入：`/input/**` 全部文件。
-- 动作：递归列出文件；按扩展名 + 文件头识别稿件、文献库、case JSON 等。脚本会自动做，但你必须核对识别结果是否合理。若材料是 PDF，**调用环境提供的 PDF 文本提取工具（如 pdf-text-tool）抽取文本**；不要仅凭文件名或标签推测内容。
-- 输出：`sources` 清单（每个文件的 `id`、`kind`、`bytes`、`sha16`），选定稿件与文献库。
-- 失败分支：材料缺失/格式不支持 → 记录 `missing_materials` 或 `degradations`；不构造内容。
-
-### 步骤 2：运行脚本生成全套基线（1 次命令，不消耗模型请求）
-
-- 输入：盘点结果。
-- 动作：执行 `python3 -B scripts/main.py --input /input --output /app/output --style <gbt7714|apa>`。若题面只要求插入建议，可加 `--no-insert`。
-- 输出：基线 `manuscript.md`、`references_formatted.md`、`references.json`、`report.md`、`result.json`。
-- 失败分支：脚本崩溃 → 你必须在 `/app/output` 手工创建合法 `result.json`（可先写 `status: input_error`），继续 Agent 手工作业；已写文件保留。
-
-### 步骤 3：真实解析关键材料（5–10 次模型请求）
-
-- 输入：步骤 1 选定的稿件与文献库。
-- 动作：**亲自读取稿件全文或关键段落，以及文献库条目题名、摘要、作者、年份、DOI、卷期页等字段。** 对 PDF 先转文本再读。记录证据摘录到 `/app/work/agent_checks.md`。
-- 输出：证据笔记，至少包含：所有小节标题、引用标记位置、每条文献的关键识别信息、稿件中数字/单位/关键论断。
-- 失败分支：PDF 未提供解析器或提取失败 → `degradations.unsupported_binary_pdf`，稿件无法解析则标 `insufficient_evidence` 并尽力保留原始内容。
-
-### 步骤 4：核对与修正脚本结果（15–25 次模型请求）
-
-- 输入：基线产物 + 步骤 3 证据笔记。
-- 动作：逐项核对：
-  1. `citation_map` 每条 `locator` 是否指向真实原句，`claim_quote` 是否逐字。
-  2. 每条引用是否落在真正需要支撑的句子（而非整段末尾）。
-  3. `dedup_decisions` 与 `ambiguous_pairs` 的判据是否成立。
-  4. 正文编号是否 1..n 连续，文末列表是否与正文一一对应。
-  5. 格式转换是否符合目标规范；缺字段是否用 `[待补]` 标记。
-  6. `verification` 中 10 项检查是否真实通过。
-- 输出：纠正错误后的 `manuscript.md`、`references_formatted.md`、`references.json`；在 `citation_map` 中可附加 `agent_review`、`agent_evidence_quote`；将无法确定项写入 `pending_human`。
-- 失败分支：证据不足 → 保留原值 + `weak_match`/`pending_human`，不强行判定。
-
-### 步骤 5：拟定完整成品与报告（4–8 次模型请求）
-
-- 输入：修正后的结果。
-- 动作：最终确认 `manuscript.md` 为可编辑成品；`references_formatted.md` 为同步文献表；`report.md` 含人读摘要、待人工确认项、错误与降级。若题面要求 Office 产物，则用环境可用工具生成并渲染 PDF/PNG 预览。
-- 输出：`/app/output/` 最终文件。
-- 失败分支：时间不足 → 保留现有完整基线，写 partial，列出未完成项；不得清空。
-
-### 步骤 6：回填 result.json（3–6 次模型请求）
-
-- 输入：全部产物。
-- 动作：确保 `result.json` 合法且包含：
-  - `case_id`
-  - `output_contract` 的全部字段（缺失写 null）
-  - §7 固定字段
-  - 真实 `sources`、`runtime`、`status`、`errors`、`degradations`、`pending_human`
-- 输出：合法 `result.json`。
-- 失败分支：JSON 序列化失败 → 写最小合法 JSON，`status: partial`，`errors` 说明原因；退出码仍 0。
-
-### 步骤 7：自检（2–4 次模型请求）
-
-- 按 §9 自检清单逐项检查；发现缺项优先补齐或标注。
-- 检查 `/app/output` 文件齐全、`result.json` 可解析、所有 `output_contract` 键存在。
-- 提交前确认未把任何未核验脚本输出冒充最终成品。
+- 仅使用 Python 标准库，禁止联网。
+- 所有路径基于 `__file__`，不依赖当前工作目录。
+- 最终产物为 UTF-8 文本；不产生 symlink。
+- 大纲、判断、中间数据可写 `/app/work`，最终交付物必须写 `/app/output`。
+- 如果 `/app/output` 不可写，按脚本已实现的回退路径处理；不得因此崩溃。
 
 ---
 
-## 6. 预算策略
+## 3. 输入盘点与来源编号（init）
 
-总预算：**64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理）**。脚本运行为普通进程调用，不计模型请求。建议分配如下：
+### 3.1 必须读取
 
-| 步骤 | 建议请求数 | 必须/可跳 | 说明 |
-|-|-|-|-|
-| 步骤 0 读任务契约 | 1–3 | 必做 | 先确定最高权重交付物 |
-| 步骤 1 盘点输入 | 1–4 | 必做 | 发现材料与格式 |
-| 步骤 2 基线脚本 | 0 | 必做 | 可全自动 |
-| 步骤 3 真实解析 | 5–10 | 必做 | 是“真实推导”的核心 |
-| 步骤 4 核对修正 | 15–25 | 必做 | 重点核对 citation_map/去重/编号 |
-| 步骤 5 成品与报告 | 4–8 | 必做 | 但可缩减润色 |
-| 步骤 6 回填 JSON | 3–6 | 必做 | 契约完整优先 |
-| 步骤 7 自检 | 2–4 | 必做 | 提交前把关 |
-| 预留异常/返工 | ≤10 | 可跳 | 处理意外格式或契约 |
+- `/input/case.json`：提取 `case_id`、`output_contract`、任务指令、约束。
+- `/input/task.md`：提取评分要求、输出字段、目标规范、边界条件。
+- 递归扫描 `/input/**`，判断稿件、文献库、辅助材料。
 
-**优先级原则**：
-1. 最先完成并落盘诚实 partial，然后增量改进。
-2. 如果预算紧张，先保 `manuscript.md` + `result.json` + 契约字段；报告润色可减。
-3. 避免重复解析同一文件；同一疑问只回看一次。
-4. 超过 800 秒或接近 60 次请求时，停止非
+### 3.2 材料类型识别
+
+按文件头、扩展名和内容嗅探，而不是只看文件名。常见类型：
+
+- 稿件：Markdown、TXT、DOCX（抽取正文文本）、PDF（实际 PDF，无预提取答案层）。
+- 文献库：`.bib`、`.ris`、`.json`、`.enw`、GB/T 7714 文本列表。
+- 辅助文件：说明、证据范围、白板信息等。
+
+### 3.3 来源编号与 locator
+
+每个输入文件分配稳定来源编号：
+
+- `S1`、`S2`、...、`Sn`。
+- `locator` 用 `S#` 加行号/段落号/页码，例如：`S1#L12-L14`、`S2#para3`、`S3#page5`。
+- 所有引用、事实、数字、论断必须带 `[S#]` 与 locator。
+
+### 3.4 生成台账
+
+`/app/work/input_manifest.json` 至少包含：
+
+```json
+{
+  "case_id": "从 case.json 提取，未知则用 task.md 标识或时间戳",
+  "files": [
+    {
+      "source_id": "S1",
+      "path": "manuscript.md",
+      "kind": "manuscript",
+      "bytes": 1234,
+      "sha16": "..."
+    }
+  ]
+}
+```
+
+`/app/work/init_ledger.json` 至少包含候选引用、候选条目、冲突分组、证据锚点。
+
+---
+
+## 4. Agent 路径：先读材料，写 draft.json
+
+### 4.1 你的职责
+
+在脚本基线之上，你必须亲自：
+
+1. 读原始稿件相关段落，定位所有引用标记，如 `[1]`、`[3-5]`、`^[1]^`、`\cite{}`、`[@key]`。
+2. 读文献库关键条目，核验作者、题名、年份、DOI、卷期页等。
+3. 将脚本抽取的 quote、locator、数字与原文逐项比对。
+4. 对不一致、低置信、重复条目、错误编号、错误合并做出决策。
+5. 把决策写入 `/app/work/draft.json`。
+
+### 4.2 draft.json 形状
+
+建议每个决策项使用如下结构：
+
+```json
+[
+  {
+    "decision_id": "D1",
+    "type": "insert_citation|replace_citation|renumber|merge|format|verify",
+    "source_id": "S2",
+    "locator": "S2#L12-L14",
+    "quote": "原文逐字摘录",
+    "manuscript_locator": "M1#para4",
+    "decision": "插入到第4段第2句之后",
+    "reason": "该句为可证伪论断，需要来源支撑",
+    "confidence": "high"
+  }
+]
+```
+
+- `quote` 必须逐字来自原文，不得改写为摘要冒充原文。
+- 找不到依据、无法判断的项，不要写进 draft；进入 `pending_human` 或 `uncertainty`。
+- 每条合并决策必须写清依据：年、卷、页、DOI、题名、作者、文献类型。
+- 不得将同一文献的不同版本/语言/数据库记录误合并，也不得把同名作者的不同文献误合并。
+
+### 4.3 增量构建
+
+Agent 路径下，先生成 draft，再让脚本 build。脚本应优先采用 draft 中的判断与原文证据构建成品；若脚本没有显式 draft 接口，则运行主命令后，由你按 draft 对成稿做增量修正，但结构化 JSON 的修改应通过 Python 脚本或脚本函数完成，而不是手工文本覆盖。
+
+---
+
+## 5. 无 draft 时的确定性兜底
+
+如果预算/时间不足，或模型请求已接近上限，不能继续做逐条核验，则：
+
+1. 使用 init 台账中的来源编号、候选引用、候选条目、冲突分组。
+2. 用确定性规则构建实质工作稿：逐字 `quote`、locator、编号重排、按目标格式生成文献表。
+3. 自动抽取/构建得到的内容必须在 `result.json.degradations` 或 `gaps` 中记入：
+
+```json
+{
+  "mode": "AUTO_EXTRACT",
+  "message": "未进行 Agent 逐条核验；产出为确定性基线。"
+}
+```
+
+4. 此时 `status` 应设为 `partial` 或更诚实的 `insufficient_evidence`/`input_error`，不得伪装成 `ok`。
+5. 保留所有已生成的中间文件和 final partial 结果，提前落盘，确保可复核。
+
+---
+
+## 6. 目标产物与契约回填
+
+### 6.1 产物文件
+
+默认必须交付：
+
+| 文件 | 内容 |
+|-|-|
+| `manuscript.md` | 可继续编辑的稿件；编号连续、文末文献表同步、引用位置尽量落到论断句 |
+| `references_formatted.md` | 按目标规范格式化后的文献表 |
+| `references.json` | 结构化文献条目 |
+| `result.json` | 最终结构化结果与契约回显 |
+| `report.md` | 方法、结果、自检、增益证据、创新证据、限制与失败处理 |
+
+若脚本额外生成 `citation_map.json`、`evidence_map.json`、`dedup_decisions.json`、`verification.json`，保留并纳入 result。
+
+### 6.2 每个数字/论断的出处
+
+在 `manuscript.md` 或 `evidence_map` 中，每个关键数字/论断/引用必须带：
+
+- `[S#]` 来源编号。
+- `S#` 对应的 `文件路径 + 行号/段落号/页码`。
+- 源头 `quote`。
+
+不允许出现“材料外新增事实”。
+
+### 6.3 result.json 双回显
+
+`result.json` 必须满足：
+
+1. 顶层包含 `case_id`。
+2. 顶层包含 `output_contract`。
+3. `output_contract` 内也包含 `case_id`。
+4. `output_contract` 内字段名与原始任务要求完全一致，原样回填。
+5. 原始 `output_contract` 中的字段同时在顶层以同名或合适字段出现一次，形成双回显。
+6. 所有数组字段即使为空也要存在，键名不可改。
+
+### 6.4 result.json 推荐结构
+
+```json
+{
+  "case_id": "CASE-X",
+  "status": "ok|partial|insufficient_evidence|input_error",
+  "sources": [
+    {"source_id": "S1", "path": "manuscript.md", "kind": "manuscript", "bytes": 123, "sha16": "..."}
+  ],
+  "citation_map": [
+    {
+      "citation_id": "C1",
+      "manuscript_locator": "M1#para4",
+      "in_text_key": "[1]",
+      "source_id": "S2",
+      "quote": "原文内容",
+      "claim_quote": "被支撑论断",
+      "match_status": "exact_match|theme_match|weak_match|unverified",
+      "match_rationale": "依据..."
+    }
+  ],
+  "evidence_map": [
+    {"claim_id": "CL1", "source_id": "S2", "locator": "S2#L12-L14", "quote": "...", "support_scope": "direct|partial|contextual"}
+  ],
+  "dedup_decisions": [
+    {"decision_id": "DD1", "decision": "merge|keep_separate|ambiguous", "reference_ids": ["R3","R7"], "basis": "doi|title_year_volume|authors", "reason": "..."}
+  ],
+  "merge_groups": [
+    {"canonical_source_id": "R3", "merged_source_ids": ["R7"], "fills": {}, "reason": "..."}
+  ],
+  "ambiguous_pairs": [],
+  "change_log": [
+    {"change_id": "CH1", "kind": "renumber|insert|delete|merge|format", "before": "...", "after": "...", "locator": "...", "reason": "..."}
+  ],
+  "verification": [
+    {"check": "key", "status": "pass|warn|fail", "detail": "..."}
+  ],
+  "counts": {
+    "input_files": 0,
+    "source_entries": 0,
+    "citations_in_text": 0,
+    "references_final": 0,
+    "inserted_citations": 0,
+    "renumbered": 0,
+    "merged": 0,
+    "format_fixed": 0,
+    "verified": 0,
+    "pending_human": 0,
+    "unresolved_markers": 0,
+    "uncited_entries": 0,
+    "missing_required": 0,
+    "auto_applied": 0
+  },
+  "uncertainty": [],
+  "pending_human": [],
+  "missing_materials": [],
+  "errors": [],
+  "degradations": [],
+  "runtime": {},
+  "output_contract": {
+    "case_id": "CASE-X"
+  },
+  "outputs": [
+    {"path": "manuscript.md", "description": "可编辑成品稿件"}
+  ],
+  "agent_review": {}
+}
+```
+
+---
+
+## 7. 六类动作的完成与自证
+
+### 7.1 引用插入与定位
+
+- 不把引用统一堆在段末或图表注附近。
+- 每个引用点尽量落在真正需要来源支撑的论断句或短句后。
+- 一句多引、多句一引要明确：在 `citation_map` 中分别记录每个 `source_id` 与对应句。
+
+### 7.2 编号更新与交叉引用
+
+- 插入、删除、调序后，正文标号与文末列表同步更新。
+- 编号必须 1..n 连续。
+- 图表注、附录引用、交叉引用同步更新；无法解决的记为 `unresolved_markers`。
+- `change_log` 中保留 `kind=renumber` 的前后映射，作为连锁更新证据。
+
+### 7.3 文献去重与条目归并
+
+- 同一文献的不同语言题名、预印本/正式版、期刊/会议版、不同数据库导出必须可解释合并。
+- 合并依据写入 `dedup_decisions`：DOI、作者、年份、卷期页、文献类型、题名相似性。
+- 相似但不确定的放入 `ambiguous_pairs`，不得强行合并。
+- `merge_groups` 记录 canonical 条目与补全字段。
+
+### 7.4 格式转换与字段补齐
+
+- 目标规范为 GB/T 7714—2015 或 APA 7；根据输入自动判断。
+- 保留 DOI、卷、期、页、文献类型标识等。
+- 中英文混排、标点差异按 `references/styles.md` 处理。
+- 缺失字段保留原值并写 `[待补]`，进入 `pending_human`。
+- 不使用网络补全字段。
+
+### 7.5 来源核验与一致性检查
+
+- DOI 只做语法/格式核验，不联网解析。
+- 元数据与正文引用条目逐条比对。
+- 检出并标记疑似编造、错配、证据不足的句子。
+- 每个引用条目必须在 `references.json` 中存在；文末列表与被引条目数一致。
+- `uncited_entries` 只记入 `counts`，不应出现在最终文末引用表中。
+
+### 7.6 正文—文献表一致性
+
+- 文中每个编号在列表中有对应条目。
+- 文献表中每条被引文献在正文有对应标记。
+- 删除/合并后旧编号不得继续残留。
+- 一致性结果写入 `verification`。
+
+---
+
+## 8. 自检流程（selfcheck）
+
+结束前逐项执行：
+
+1. `result.json` 是合法 JSON，无注释、无尾逗号；可执行：
+   ```bash
+   python3 -B -c 'import json,sys; json.load(open(sys.argv[1]))' /app/output/result.json
+   ```
+2. `case_id` 在 `result.json` 顶层与 `result.json.output_contract` 中均存在。
+3. `output_contract` 的全部原始字段原样出现，类型合法。
+4. `/app/output` 下存在：`manuscript.md`、`references_formatted.md`、`references.json`、`result.json`、`report.md`；若材料不足，则 `missing_materials` 中说明。
+5. 正文引用编号为 1..n 连续，或未解析标记已记录。
+6. 每个正文编号在文末文献表有对应条目；文末列表无孤立条目。
+7. `citation_map` 每条有 `key/source_id/locator/claim_quote/quote`。
+8. `dedup_decisions` 每条有 `reasons`；不确定项在 `ambiguous_pairs`。
+9. `sources[]` 包含每个输入文件的 `id/kind/path/bytes/sha16`。
+10. 所有 `quote` 均逐字来自源文件，不在材料中的事实不进入交付物。
+11. `agent_review` 字段存在，记录 Agent 亲核至少 3 项：引用定位、编号、去重、格式、事实保留。
+12. `errors`、`degradations`、`pending_human`、`uncertainty` 均存在，即使为空数组。
+13. 无网络依赖、无第三方依赖；脚本 `--help` 可用且退出码 0。
+14. 最终 `status` 诚实；不确定项已标注。
+15. 若生成 Office/slide/diagram 类可编辑文件，若平台有 `soffice` 或等价转换器，应附 PDF/PNG 预览；若不可用，保留可编辑文件并记录 `no_office_preview` degradation。
+
+---
+
+## 9. 预算策略
+
+- 官方预算：64 次模型请求、900 秒、单次响应含推理 16384 tokens。
+- 脚本运行不消耗模型请求，但尽量控制在 30–60 秒内。
+- 推荐模型请求分配：
+
+| 阶段 | 请求数 |
+|-|-|
+| init/盘点输入 | 1–2 |
+| 读材料/证据 | 3–6 |
+| 写 draft/修正成稿 | 3–5 |
+| selfcheck/契约回填 | 1–2 |
+| 终检 | 1 |
+
+合计约 12–17 次，留 47 次以上余量。
+
+**止损规则**：
+
+- 一旦累计请求 ≥ 60，或耗时 ≥ 800 秒：立即停止增强，写合法 partial `result.json`，退出 0。
+- 大文件不要全文读，只读引用标记、文末列表、关键论断周边段落。
+- 先落盘完整 baseline，再逐步增强；不要为低价值细节消耗请求。
+- 如果 `/app/output` 已有一份合法 partial，增强失败时保留旧 partial 版本可核验。
+
+---
+
+## 10. 异常与降级
+
+始终产出合法 `result.json`，退出码 0。
+
+| 情况 | 处置 | status |
+|-|-|-|
+| `case.json` 缺失或坏 JSON | 记录 `errors`，继续扫描材料，用 `task.md` 标识或时间戳作 case_id | `input_error` 或 `partial` |
+| `/input` 为空 | 生成最小合法 result，所有字段占位，记录 `missing_materials` | `input_error` |
+| 稿件缺失 | 不虚构稿件，缺失材料登记 | `insufficient_evidence` |
+| 文献库缺失/无法识别 | 不构造条目，只做结构回显或建议，记录缺失 | `insufficient_evidence` |
+| PDF 无文本层/乱码 | 不伪造答案层，记录 `unsupported_binary_pdf` | 视其余材料 |
+| DOCX 解析丢失上标/版式 | 保留文本，标注版式需人工复核 | `partial` |
+| 单文件解析异常 | 只降级该文件，记录 `degradations` | 继续 |
+| 条目字段缺失 | 保留原值/`[待补]`，加入 `pending_human` | `partial` |
+| DOI 非法 | 保留原值，DOI 语法检查不通过 | 继续 |
+| 编号指向列表外 | 原样保留，记录 `unresolved_markers` | 继续 |
+| 重复/歧义无法判断 | 不合并，放入 `ambiguous_pairs` | 继续 |
+| 脚本失败 | 捕获错误，Agent 手工构造最小合法 result，退出 0 | `partial`/`input_error` |
+| 模型请求/时间耗尽 | 保存当前 partial，不再调用模型 | `partial` |
+
+---
+
+## 11. 使用增益与创新证据
+
+平台会做基础 Agent 与 Skill Agent 对照；你不需要自造 baseline 分数。
+
+在 `report.md` 中如实呈现以下证据，全部来自本地实际产物：
+
+### 11.1 质量增益证据
+
+- `verification` 中通过的确定性检查：编号连续、无孤立引用、无重复 DOI、正文—文献表一致。
+- `citation_map` 中 `weak_match`/`unverified` 数量，说明低置信项被显式标出。
+- `pending_human` 数量，说明减少人工逐条核对量。
+
+### 11.2 效率增益证据
+
+- `counts.auto_applied`：自动完成的插入/编号/去重/格式转换数量。
+- `counts.pending_human`：仍需人工确认的数量。
+- 两者比例用于说明人工修改量下降；不要编造外部流程的具体工时。
+
+### 11.3 创新证据
+
+- 编号连锁更新：`change_log` 中 `kind=renumber` 的前后映射链。
+- 论断级引用匹配：`citation_map` 中每条的 `claim_quote` 与 `match_rationale`。
+- 可解释去重：`dedup_decisions` 与 `merge_groups` 的合并判据。
+- 格式映射规则：`references/styles.md` 中 GB/T 7714 / APA 映射表。
+
+### 11.4 生态复用证据
+
+- 去重规则、冲突处理规则见 `references/rules.md`。
+- 格式规则见 `references/styles.md`。
+- 调用说明、限制、失败模式见 `references/usage.md`。
+- 脚本为可运行、无网络、纯标准库工具。
+
+---
+
+## 12. 最小调用示例
+
+示例输入：
+
+```text
+/input/case.json
+/input/task.md
+/input/manuscript.md
+/input/refs.bib
+```
+
+示例调用：
+
+```bash
+python3 -B scripts/main.py run --input /input --output /app/output --work /app/work
+```
+
+示意输出：
+
+```text
+/app/output/manuscript.md
+/app/output/references_formatted.md
+/app/output/references.json
+/app/output/report.md
+/app/output/result.json
+```
+
+`result.json` 中的 `status` 为示意，正式案例下必须诚实反映实际运行状态。
+
+---
+
+## 13. 禁止事项
+
+1. 不得将脚本骨架、模板或未经验证的 baseline 直接当最终成品。
+2. 不得手工覆盖结构化 JSON 的契约字段结构；应通过脚本函数或 Python json 处理。
+3. 不得生成金标准答案、伪造 diff 报告、伪造 benchmark 分数。
+4. 不得补造材料中不存在的科学事实、文献、DOI、卷期页。
+5. 不得因脚本失败、输入错误或格式不支持而退出非 0。
+6. 不得忽略 `output_contract` 中任何原始字段。
+7. 不得把同一篇文献的不同版本误合并，也不得把同名作者的不同文献误合并。
+8. 不得网络检索或调用未声明的第三方依赖。
+
+---
+
+## 14. 成功兜底定义
+
+如果无法达到 `ok`，至少做到：
+
+- `/app/output/result.json` 存在且合法。
+- `case_id` 尽力提取，未知则 `"unknown"`。
+- `status` 诚实为 `input_error`、`insufficient_evidence` 或 `partial`。
+- `sources` 列出已扫描到的输入文件。
+- `output_contract` 的原字段全部出现，空值/占位合法。
+- `errors`/`missing_materials`/`degradations` 说清限制。
+- 其他产物若无法生成，在 `outputs` 中说明原因。
+
+这比完美但崩溃更能得分，也符合 runtime contract。

@@ -1,262 +1,321 @@
 ---
 name: literature-evidence-verification
-description: Verify whether a statement about a paper, report or dataset is actually supported by the source text, not merely on-topic. Splits compound claims into atomic fact/comparison/causal/scope sub-claims, locates verbatim evidence with paragraph and page locators, and assigns one of four support levels—supported, partially_supported, contradicted, insufficient_evidence—with reasons, conflict pairing, and explicit uncertainty. Use when the user asks to fact-check a claim, audit a citation, or verify a claim list against a PDF. Emphasizes actual source parsing, honest partial delivery, and agent-authored final outputs.
-version: 2.0.0
+description: Verify whether a claim about a paper, report or dataset is actually supported by the source text, not merely on-topic. Splits compound claims into atomic fact/comparison/causal/scope sub-claims, locates verbatim evidence with paragraph/page/field locators, and assigns one of four support levels—supported, partially_supported, contradicted, insufficient_evidence—with reasons, conflict pairing, uncertainty, and explicit limits. Use when the user asks to fact-check a claim, audit a citation, verify a claim list against a PDF, or produce evidence cards. Emphasizes actual source parsing, deterministic fallback, agent-authored final outputs, and honest partial delivery.
+version: 3.0.0
 ---
 
-# 文献证据溯源与事实核验（literature-evidence-verification）
+# 文献证据溯源与事实核验 Skill：Agent 执行手册
 
-## 0. 铁律：脚本只是工具，最终交付物必须由 Agent 亲自读材料、推导、撰写
+## 0. 最高优先级：一条命令，全流程可运行
 
-1. 本 Skill 内的脚本和模板用于构建语料、检索候选证据、执行初判、落盘基线产物。  
-   **最终 `result.json`、`evidence_cards.jsonl`、`verification_report.md` 以及题面额外要求的可编辑产物，必须经过你（Harness Agent）亲自读取实际材料、核对关键证据、推导后增强或改写。**
-2. 不得把脚本骨架、模板输出、未核验的自动结果直接当成品提交。
-3. 先运行脚本产出全套基线交付物，再在其上增量增强；不得删除、清空或遗漏基线与契约字段。  
-   所有 Agent 增强过的地方写 `reviewed_by_agent: true`，并记录改了什么、依据哪段原文。
-4. 完整性优先于数量：先保证 `output_contract` 全部字段、`result.json` 本身、题面要求的每个文件都存在；再追求额外判定的精细度。
-5. 诚实优先：不确定、材料不足、定位失败，写 `pending_human` / `limitations` / `insufficient_evidence`，不得编造数据、引用、分数、页码。
+1. **先跑脚本基座，再做 Agent 核验。** 首选单命令：
 
----
+   ```bash
+   python3 -B scripts/verify_claims.py --input /input --output /app/output
+   ```
 
-## 1. 用途与边界
+   若安装的 `scripts/verify_claims.py` 支持 `--work`，优先使用：
 
-把待核验论断当作待证问题，拆成可独立核验的子判断，回到原文段落取逐字证据，给出四级支持度、判定理由、冲突双方定位与不确定性，产出可复核的证据卡片或核验报告。
+   ```bash
+   python3 -B scripts/verify_claims.py --input /input --output /app/output --work /app/work
+   ```
 
-适用：单篇或少量文献的论断核验、引用支持度检查、摘要与正文一致性核对、论断清单批量核验。
+   该命令内部等价于：`init`（材料盘点、来源编号、候选抽取、冲突分组）→ `build`（校验、兜底抽取、渲染全部产物、finalize `result.json`）→ `selfcheck`（产物与契约自检）。**没有人工草稿时，脚本必须用确定性抽取生成实质工作稿**：逐字 quote、locator、四级判定候选，并诚实写入 `AUTO_EXTRACT`。Agent 后续增量改进不能破坏这条基座。
 
-边界（如实写进 `limitations` / `uncertainties`）：
+2. **任何情况下退出码必须为 0。** 脚本崩溃时，阅读 traceback，尝试用 `scripts/verify_claims.py --help` 找到最小可用参数；若无法修复，则按 `references/io-contract.md` 手写最小合法 `result.json`，所有 claim 判 `insufficient_evidence`，并记录错误与可人工接管位置。
 
-- 定位粒度是句子 / 两句窗口 / 段落单元，不是像素级图表读数；图注缺失时图表结论只能判 `insufficient_evidence`。
-- 不做跨文献元分析、不算统计量、不推断原文没做的实验。
-- 扫描件或 CID 编码 PDF 无文本层时，不臆造原文，只登记缺口并建议 OCR / 人工读页。
-- 不属于本课题的请求（写论文、翻译、绘图、跑数值实验）应直接说明不适用，不要硬套本 Skill。
+3. **结构化 JSON 不得手工编辑。** `result.json`、`evidence_cards.jsonl` 等结构化产物由脚本生成或由 `scripts/lit_core.py` 内的函数重算后覆盖。Agent 的核验、修正、改写通过 `/app/work/draft.json`、`/app/work/agent_review.json` 与脚本功能完成，不得直接改 JSON 文本。
 
 ---
 
-## 2. 运行契约与目录
+## 1. 用途、触发与拒绝边界
 
-- 输入：`/input/case.json`、`/input/task.md`、`/input/claims-to-verify.json`，以及题面规定的材料。  
-  **必须真实解析材料内容**，用平台预装 PDF 文本提取工具（如 `pdf-text-tool` 或 `pdftotext`）或脚本内置提取器读取实际文件内容；不得依据文件名、领域标签或题目背景猜测内容。
-- 工作目录：`/app/work`，中间语料、候选证据、草稿写在这里。
-- 最终产物：`/app/output`，必须包含：
-  - `result.json`：含输入 `case_id` 和原 `output_contract` 的全部字段（键名不改）。
-  - `evidence_cards.jsonl`：一卡一子判断的机器可读底稿。
-  - `verification_report.md`：人读核验摘要。
-  - 若题面要求可编辑 Office / 幻灯片 / 图形产物，则除原格式外，必须在 `/app/output` 额外生成真实渲染的 PDF / PNG 预览。
-- 调用脚本：
+### 适用
 
-      python3 -B scripts/verify_claims.py --input /input --output /app/output
+- 核对一个或多个科学论断是否真正被原文支持。
+- 检查引用是否包含对应结论，尤其是摘要与正文不一致、跨页证据、图表引用。
+- 输出证据卡片：`论断 → 证据片段 → 原文定位 → 支持度判定 → 判定理由`。
+- 批量核验 `claims-to-verify.json` 或 `case.json` 中的 claims。
 
-  查看参数：
+### 触发
 
-      python3 -B scripts/verify_claims.py --help
+- “帮我核验这句话/这段论断/这些 claims。”
+- “检查引用是否真的支持结论。”
+- “对这篇论文做引用审计/事实核验。”
 
-- 只有 Python 标准库时不依赖网络；若环境提供 `pdftotext` / `pdf-text-tool` / OCR，优先使用并把工具名写入 `sources[].extraction_method`。
-- 异常必须捕获，**退出码恒 0**；先写 partial `result.json`，再 finalize 覆盖。
+### 拒绝/不适用
 
----
-
-## 3. 输入发现与语义识别
-
-1. 首先读取 `/input/case.json` 的 `case_id`、`output_contract`，并识别 claims 来源。
-2. claims 读取顺序：`/input/claims-to-verify.json` → `case.json` 中的 `claims` / `claims_to_verify` / `statements` / `audit_claims` / `input.claims` → 其他明显 claim 列表字段。
-3. claim 字段别名：`claim_id | cid | id | claim_no`，文本别名：`claim_text | text | statement | claim | sentence | quote`。纯字符串列表自造 `C1..Cn`，原名回填 `claims[].input_claim_id`。
-4. 材料发现：递归扫 `/input/**`，按扩展名与内容识别 JSON / CSV / TXT / MD / DOCX / PDF / HTML。图表只登记 `gaps`，不猜像素或图注。
-5. **claims 文本一律当问题**，不得当结论照抄进 `claims[].text` 之外的事实位。
+- 写论文、翻译、绘图、跑数值实验、跨文献 meta 分析等不属于单个文献证据核验的请求，直接说明不适用。
+- 缺少 claims 或材料时，不发明论断、不补造科学数据，只返回 `status=input_error` 或 `partial`。
 
 ---
 
-## 4. 本题专属执行流程
+## 2. 输入、材料与运行目录
 
-以下步骤按顺序执行；每一步失败只降级到对应分支，不得中断全局。
+### 输入文件优先级
 
-### 步骤 1：盘点输入与契约
+1. `/input/case.json`：`case_id`、`output_contract`、可能的 claims 或材料清单。
+2. `/input/task.md`：任务要求、文件约定、额外输出字段。
+3. `/input/claims-to-verify.json`：实际待核验论断。**这些是问题，不是权威事实。**
+4. `/input/` 下所有材料：PDF、JSON、CSV、TXT、MD、DOCX、HTML 等。
 
-- **输入**：`/input/case.json`、`/input/task.md`、`/input/claims-to-verify.json`、`/input/**`。
-- **动作**：
-  1. 读取 `case_id`、`output_contract`、claims 列表、材料清单。
-  2. 在 `/app/work/manifest.json` 写清字段名、文件路径、可解析格式。
-  3. 缺失 `output_contract` 时，按 `references/io-contract.md` 的默认字段回退。
-- **输出**：输入清单、claims 数、contract 键列表、可用材料列表。
-- **失败分支**：`case.json` 坏 JSON → 记 `errors`，继续用目录其他材料，最终 `status=partial`；claims 缺失 → 不造论断，`status=input_error`，但仍产出合法 `result.json`。
+### claims 字段别名
 
-### 步骤 2：真实解析材料
+- claim 文本：`claim_text | text | statement | claim | sentence | quote`
+- claim ID：`claim_id | cid | id | claim_no`
+- claims 列表可能位于 `claims`、`claims_to_verify`、`statements`、`audit_claims`、`input.claims`。
+- 纯字符串列表：自造 `C1..Cn`，并回填 `input_claim_id`。
 
-- **输入**：步骤 1 发现的材料文件。
-- **动作**：
-  1. 对每个材料调用平台文本提取工具或脚本解析器，陪出实际文本层。
-  2. 将每篇材料切成带 locator 的段落单元；记录 `sources[]`（路径、格式、单元数、提取方式、页序）。
-  3. 记录 `extraction_quality`：直接文本 / OCR / CID 乱码 / 无文本层。
-- **输出**：`/app/work/corpus.jsonl` 或等价语料，每条带 `source_id`、`unit_id`、`section`、`page`、`block`、`text`。
-- **失败分支**：
-  - PDF 无文本层或扫描件：登记 `degradations` + `gaps`，相关 claims 判 `insufficient_evidence`，并写 `pending_human` 建议 OCR。
-  - 材料损坏 / 格式不支持：保留可用材料，缺失材料写 `sources[].status=unavailable`，不臆造。
+### 输出
 
-### 步骤 3：拆解论断并建立证据锚点
-
-- **输入**：claims 文本 + 语料。
-- **动作**：
-  1. 按 `references/decomposition-and-cards.md` 将每条 claim 拆成 1–7 个子判断，标 `type`：`fact / comparison / causal / scope`。
-  2. 标明每个子判断的 `required_evidence_type`。
-  3. 抽取 `comparator`、`negation`、`significance`、`conditions`、数值与型号锚点（如 `200°C`、`6061`、`35%`）。
-- **输出**：`/app/work/claims_decomposed.json`。
-- **失败分支**：拆不开 → 将该 claim 标记 `decomposition: failed`，整条按原始表述核验，并记录 `pending_human: 需要人工拆解`。
-
-### 步骤 4：运行基线脚本产出全套候选
-
-- **输入**：步骤 2 语料 + 步骤 3 拆解结果。
-- **动作**：
-  1. 运行 `scripts/verify_claims.py --input /input --output /app/output`。
-  2. 确保脚本产出 `result.json`、`evidence_cards.jsonl`、`verification_report.md` 三个基线文件。
-  3. 检查 `result.json` 顶层是否已包含 `case_id` 与 `output_contract` 全部键；缺失字段用 `null / [] / {}` 补齐，并在 `degradations` 记 `contract_field_filled_empty`。
-- **输出**：完整基线交付物，但仍是“候选”，不是最终判定。
-- **失败分支**：脚本崩溃 → 读脚本 traceback，若可修复则修复后重跑；不可修复则手工按插件内容生成最低合法 `result.json`，所有 claim 判 `insufficient_evidence`，记录错误。
-
-### 步骤 5：Agent 亲自核验、增强与派生
-
-- **输入**：基线产物 + 语料 + claims 列表。
-- **动作**：
-  1. 优先核验 rubric 权重最高的交付物：所有 claim 是否有 verdict、关键证据是否真实存在、支持度判定是否站得住。
-  2. 抽查至少全部 `supported` / `contradicted` 卡的 quote，与原文逐字比对；若存在误支持，修正为 `partially_supported` 或 `insufficient_evidence`。
-  3. 对长难句、跨页证据、冲突卡逐个精读，补齐判定理据。
-  4. 若题面要求 Office / 幻灯片 / 图形产物，亲自撰写/制作可编辑文件，并生成真实渲染的 PDF / PNG 预览。
-  5. 将 Agent 核验结果写入 `result.json`：哪些维持基线、哪些改写、哪些 `pending_human`、哪些修正为 `conflicts`。
-- **输出**：增强后的全套交付物；每条 Agent 改过项有 `reviewed_by_agent: true` 和 `change_record`。
-- **失败分支**：单个 claim 证据不足 → 判 `insufficient_evidence`，保留 `search_scope`，继续处理其他 claim；单个 claim 异常不中断全局。
-
-### 步骤 6：自检 rubric 并回填 result.json
-
-- **输入**：增强后的产物 + `references/verdict-rubric.md` + 输入 contract。
-- **动作**：
-  1. 逐条核对“rubric 维度 → 交付要求 → 自证方式”表。
-  2. 核对 `claim → sub_claim → quote → locator → verdict + rationale` 五段链完整。
-  3. 检查 `coverage` 计数自洽，`uncertainties` / `pending_human` 与实际一致。
-  4. 确认 `status` 真实：`success` / `partial` / `insufficient_evidence` / `input_error`。
-  5. 确认所有 `output_contract` 键已回填。
-- **输出**：最终 `/app/output/result.json` 等文件。
-- **失败分支**：缺字段则先补全；离预算不足时至少保留已落盘的 honest partial，不要为了完美破坏完整性。
+- 最终产物必须在 `/app/output/`。
+- 中间语料、候选、草稿、agent 改稿放在 `/app/work/`。
+- 最终结果至少包含：
+  - `result.json`
+  - `evidence_cards.jsonl`
+  - `verification_report.md`
+  - 若合同要求可编辑 Office/幻灯片/图形产物，则须同时附真实渲染的 PDF/PNG 预览。
 
 ---
 
-## 5. 预算策略：64 次模型请求 / 900 秒内如何分配
+## 3. 执行流程：init → build → selfcheck
 
-1. **必须完成的高权重事项，先做**：
-   - 读 input、contract、claims：约 3–6 次模型请求。
-   - 运行基线脚本，获得全套候选：1 次脚本调用。
-   - 核验并修正所有 `supported` / `contradicted` 卡的关键证据：约 10–20 次模型请求。
-   - 回填 contract 字段、写 status / limitations / pending_human：约 4–8 次模型请求。
-2. **可跳过或压缩的低优先级事项**：
-   - 对所有 `insufficient_evidence` 卡逐条人工解释：仅在证据 margin 接近阈值时做。
-   - 对每项子判断做额外统计元分析：不做。
-   - 冗余重复验证：同一证据只需一次逐字核验，后续引用记录 `evidence_id`。
-3. **尽早落盘 partial**：
-   - 步骤 4 脚本跑完立即确认 `/app/output/result.json` 已写入所有 contract 键，即使个别字段为空。
-   - 步骤 5、6 每完成一轮核验就覆盖保存一次；不要在最后才一次性写盘。
-4. **超时 / 请求不足时**：
-   - 剩余 claim 标 `not_processed_budget`。
-   - 已核验部分保留 `success` 或 `partial`，缺失部分写入 `limitations`。
-   - 永远返回退出码 0 和合法 `result.json`。
+### Phase 1：init —— 盘点、抽取、候选
+
+1. 读取 `case_id`、`output_contract`、claims 列表、材料清单。
+2. 在 `/app/work/manifest.json` 记录：
+   - `case_id`
+   - `contract_fields`：原始 `output_contract` 键列表
+   - `claim_count`
+   - `sources[]`：来源文件、格式、可解析方式、页数/单元数
+   - `missing_inputs[]`
+3. 真实解析材料：
+   - 对 PDF 使用平台预装的 `pdftotext` 或 `pdf-text-tool`；记录 `extraction_method`。
+   - 将文本切成带 locator 的段落/句子单元，写 `/app/work/corpus.jsonl`。
+   - 每条包含 `source_id`、`unit_id`、`section`、`page`、`block`、`text`。
+4. 拆解 claims：
+   - 每个 claim 拆成 1–7 个子判断，类型：`fact / comparison / causal / scope`。
+   - 为每个子判断标注 `required_evidence_type`。
+   - 提取并保留 `comparator`、`negation`、`significance`、`conditions`、数值/型号锚点。
+5. 确定性候选抽取：
+   - 为每个子判断检索最小充分证据：逐字 quote + locator。
+   - 不要只按主题相关性泛泛匹配；必须检查比较词、否定词、显著性、条件。
+   - 冲突证据同时保留双方。
+   - 写 `/app/work/candidates.json`。
+
+### Phase 2：build —— 兜底抽取与产物渲染
+
+1. 运行脚本基座生成全套基线：
+   ```bash
+   python3 -B scripts/verify_claims.py --input /input --output /app/output
+   ```
+2. 脚本必须产出并保留：
+   - `result.json`
+   - `evidence_cards.jsonl`
+   - `verification_report.md`
+3. 如果没有 Agent 草稿，脚本使用 init 阶段候选稿确定性生成工作稿。该稿必须：
+   - 每条有 `verdict`：仅限 `supported / partially_supported / contradicted / insufficient_evidence`
+   - 每条有 `quote` 与 `locator`
+   - 标 `reviewed_by_agent: false`
+   - 标 `extraction_method: "deterministic"`
+   - 在 `degradations` / `gaps` 中写 `AUTO_EXTRACT`
+4. 检查合同：`result.json` 顶层必须包含 `case_id` 与 `output_contract` 的每一个键；缺失用 `null / [] / {}` 补齐，并在 `degradations` 记录 `contract_field_filled_empty`。
+5. 若题面要求可编辑 Office/幻灯片/图形产物，生成可编辑文件和真实渲染 PDF/PNG 预览；若渲染失败，保留可编辑文件并写 `degradations`，用纯文本或 HTML 预览替代。
+
+### Phase 3：Agent 路径 —— 真实阅读与增量核验
+
+1. 在脚本基座完成后，Agent 必须真实读取 `/input` 材料原文，逐条核验：
+   - 抽取的 quote 是否逐字存在；
+   - locator 是否指向正确 section/paragraph/page；
+   - 数字、比较词、否定词、显著性、条件是否未被截断；
+   - `supported` / `contradicted` 是否真的站得住，尤其要防止“主题相关”被判为“支持”。
+2. Agent 修正写入 `/app/work/draft.json`，推荐形状：
+   ```json
+   {
+     "overrides": [
+       {
+         "claim_id": "C1",
+         "verdict": "partially_supported",
+         "quote": "原文逐字句",
+         "locator": {"source_id": "S1", "unit_id": "P3", "page": 5},
+         "rationale": "判定理由",
+         "confidence": "low|medium|high"
+       }
+     ]
+   }
+   ```
+3. 若脚本支持 `--draft /app/work/draft.json`，则重新运行脚本合并 draft；若脚本不支持，则使用 `scripts/lit_core.py` 中的读取/合并/写入函数重算并覆盖 JSON，**不得手工编辑 JSON 文本**。所有 Agent 改过项写 `reviewed_by_agent: true` 与 `change_record`。
+4. Agent 额外写 `/app/work/agent_review.json`：
+   - 逐条 claim_id → `verified/rejected/reason`
+   - `script_fixes`
+   - `uncorrected_baseline_issues`
+5. Agent 亲自撰写/改写正文型交付物，如 `verification_report.md` 或题面要求的可编辑产物。每个数字、引用、论断必须在 `evidence_cards.jsonl` 或 `result.json.verifications[]` 中有依据。
+
+### Phase 4：selfcheck —— 契约与证据链自检
+
+结束前逐项核对：
+
+1. `result.json` 合法 JSON，`case_id` 与输入一致，或诚实标 `UNKNOWN`。
+2. `output_contract` 的每个字段同时出现在：
+   - `result.json` 顶层
+   - `result.json.output_contract`（嵌套回显）
+3. 每条输入 claim 都有 `verdict`，且只取四值之一。
+4. 每个子判断有证据，或 `insufficient_evidence` 且 `search_scope` 非空。
+5. 每条 quote 可在 `sources[].path` 对应文件中逐字检索；找不到就弃用，改 `pending_human`，不得改原文凑通过。
+6. 含比较/否定/显著的 claim，`comparator/negation/significance` 非空。
+7. 冲突两侧都有 locator + quote，保留性判定写 `qualified_verdict`，通常 `partially_supported` 且 `confidence=low`。
+8. `coverage` 计数自洽；未报告项写 `uncertainty`；需人工项写 `pending_human`。
+9. 异常、限制、运行状态真实。
+10. 所有合同字段落盘；所有缺失显式列为缺口，不伪装为已完成。
 
 ---
 
-## 6. 隐藏案例鲁棒性与异常降级
+## 4. 判定规则与证据规范
 
-| 情况 | 处置 | status |
-|---|---|---|
-| `case.json` 坏 JSON / 缺失 | 记 `errors`，继续用目录其他材料；`case_id` 未知则写 `UNKNOWN` | `partial` |
-| `claims-to-verify.json` 缺失但 `case.json` 有 claims | 用 `case.json` 内 claims | 正常 |
-| 无 claims 可读 | 不造论断，`result.verifications=[]`，提示补齐清单 | `input_error` |
-| 材料缺失 / 损坏 / 格式不支持 | 登记 `degradations` + `gaps`，仅用可用材料，缺失部分挂 `pending_human` | `partial` |
-| PDF 无文本层 / 扫描件 / CID 乱码 | 不臆造原文；相关 claims 判 `insufficient_evidence`；建议 OCR / 人工读页 | `insufficient_evidence` |
-| claim 含未提供的图表读数，图注缺失 | 图注结论判 `insufficient_evidence`，不猜像素 | `partial` |
-| 证据冲突 | 双方并列 `conflict.both_sides[]`，每条带 locator + quote，给出保留判定 | 正常 |
-| 单 claim 异常 | 记 `errors`，该条判 `insufficient_evidence`，其余继续 | `partial` |
-| 超时 / 请求不足 | 剩余标 `not_processed_budget`，保留已核验部分 | `partial` |
-| 需要可编辑 Office/幻灯片/图形但无法渲染 | 保留可编辑文件；渲染失败写 `degradations` 并尽快用纯文本或 HTML 预览替代 | `partial` |
+### 四级判定定义
 
-任何情况下都要产出合法 `result.json`，退出码 0。无法判断原因和可人工接管位置必须写清楚。
+- `supported`：原文明确陈述或者直接蕴含该子判断，且比较、否定、显著性、条件一致。
+- `partially_supported`：原文支持部分内容，但缺少必要条件、存在范围限制、跨句拼凑而不完全等价、或证据强度弱。
+- `contradicted`：原文明确给出相反表述或相反数据。
+- `insufficient_evidence`：原文未报告、无法定位、图注缺失、扫描件无文本层、或只能主题相关但不能形成严格支持。
+
+### 重要原则
+
+- **主题相关不等于支持。** 关键词重叠不能判 `supported`。
+- **未报告的扩展推断不是实验否定。** 原文没有做某种比较，不要判为 `contradicted`，只能 `insufficient_evidence`。
+- **冲突来源必须并列。** `conflict.both_sides[]` 两条，各有 locator 与 quote。
+- **跨页/跨段证据**：给两条 quote，逐条保留原始措辞与数值。
+- **图表读数**：无图注或无法读取像素时，不猜，判 `insufficient_evidence`，写 `pending_human` 建议人工读图。
+
+### 证据字段规范
+
+每条证据包含：
+
+- `source_id`
+- `locator`：`json_pointer` 或 `unit_id + section + page + block`
+- `quote`
+- `supports`：true/false
+- `role`：`minimal_sufficient / counter / context`
+- `reason`
 
 ---
 
-## 7. 输出契约与完整交付单
+## 5. result.json 契约
+
+`result.json` 必须包含：
+
+```json
+{
+  "case_id": "输入 case_id 或 UNKNOWN",
+  "status": "success|partial|insufficient_evidence|input_error",
+  "output_contract": {},
+  "verifications": [],
+  "claims": [],
+  "coverage": {},
+  "sources": [],
+  "uncertainty": [],
+  "pending_human": [],
+  "errors": [],
+  "degradations": []
+}
+```
+
+要求：
+
+- `output_contract` 中所有原始字段，必须**原样嵌套**在 `output_contract` 内；
+- 同时也要在 `result.json` 顶层出现一次；缺失值用 `null/[]/{}` 补齐；
+- 未知字段保留；
+- 未产出字段在 `degradations` 记 `contract_field_filled_empty`；
+- `result.verifications[]` 是输入论断判定；
+- `claims[]` 是本次运行结论清单，`claim_id` 前缀 `V-`，包含 `kind`、`evidence[]`、`source_id`、`location`、`conditions`、`readability: directly_read|inferred|undetermined`。
+
+---
+
+## 6. 文件交付单
 
 | 文件 | 作用 | 关键要求 |
 |---|---|---|
-| `result.json` | 主产物 | 含 `case_id`；原 `output_contract` 全部字段在顶层；`result.verifications[]` + `claims[]` + `coverage` + `uncertainties` + `pending_human` + 运行状态 |
-| `evidence_cards.jsonl` | 一卡一子判断 | 每条含 `claim_id`、`sub_claim_id`、`evidence`、`verdict`、`rationale`、`locator` |
-| `verification_report.md` | 人读摘要 | claim → 子判断 → 判定 → 原句 → 可复核定位 |
-| 可编辑产物及预览 | 若题面要求 | 可编辑 Office/幻灯片/图形产物 + 真实渲染的 PDF/PNG 预览，不能只给扩展名假文件 |
-
-命名分工：`result.verifications[]` 是输入论断的判定；`claims[]` 是本次运行的结论清单（`claim_id` 前缀 `V-`，含 `kind`、`evidence[]`、`source_id`、`location`、`conditions`、`readability: directly_read|inferred|undetermined`）。两者不混用。
-
-`output_contract` 的每个键都原样出现在 `result.json` 顶层；缺值用 `null/[]/{}` 补齐；未知字段保留。未产出的键在 `degradations` 记 `contract_field_filled_empty`。字段细节见 `references/io-contract.md`。
+| `result.json` | 主结构化结果 | 顶层与嵌套双回显；四级判定；来源、不确定、人工项、错误、降级 |
+| `evidence_cards.jsonl` | 一卡一子判断机器可读底稿 | 每条含 `claim_id`、`sub_claim_id`、`evidence`、`verdict`、`rationale`、`locator` |
+| `verification_report.md` | 人读核验摘要 | claim → 子判断 → 判定 → 原文 quote → 可复核定位 |
+| `/app/work/draft.json` | Agent 覆盖稿 | Agent 修正判定、quote、locator、理由 |
+| `/app/work/agent_review.json` | Agent 核验记录 | 逐条 `verified/rejected/reason`、`script_fixes` |
+| 题面要求的可编辑产物 | 可编辑格式 + PDF/PNG 预览 | 不得只给扩展名假文件 |
 
 ---
 
-## 8. 证据与定位规范
+## 7. 隐藏案例鲁棒性
 
-- 每条证据含 `source_id`、`locator`（`json_pointer` 或 `unit_id` + `section` + `page` 或 `block`）、逐字 `quote`、`supports`（true/false）、`role`（`minimal_sufficient` / `counter`）。
-- quote 保持原文措辞与数值，**不得截断掉比较对象、否定词、数值或显著性表述**；跨段证据给两条 quote。
-- quote 在原文找不到 → 弃用该证据并写 `pending_human`；**不改原文凑通过**。
-- PDF 页序与提取方式写入 `sources[]`；提取质量差（CID/乱码）记 `degradations` 并要求人工复核。
-
----
-
-## 9. 冲突与人工确认
-
-- 冲突必须**双方并列**：`conflict.both_sides[]` 两条，各有 locator 与 quote，`qualified_verdict` 给保留判定（通常 `partially_supported`，`verdict_confidence=low`），并说明条件差异；禁止折中、禁止只报一方。
-- 进 `pending_human` 的情形：原文缺失/不可读、图注缺失、quote 无法定位、论断拆不开、冲突无法裁决、contract 字段无法产出。每条写清“缺什么 + 人工下一步”。
-
----
-
-## 10. rubric 维度 → 交付要求 → 自证方式对照表
-
-| rubric 维度 | 交付要求 | 自证方式 |
+| 情况 | 处置 | status |
 |---|---|---|
-| 任务完成度 15 | 每条 claim 必有 `verdict`；拆出的每个子判断有独立判定；`claims_requested == claims_verified` | `result.verifications[]` 长度和 claim 总数一致；`coverage.counts` 自洽 |
-| 结果正确性 15 | 证据片段真实存在于所标位置；支持度判定站得住；区分主题相关与真正支持 | quote 可以通过脚本逐字检索到；`verdict` 与 `references/verdict-rubric.md` 规则一致；误支持被锚点门控挡住 |
-| 结果完整性 5 | 覆盖事实、比较、因果、范围子判断；正反证据；冲突来源与限制条件 | 每子判断有 `evidence` 或 `insufficient_evidence` 且 `search_scope` 非空；冲突卡 `both_sides` 齐全 |
-| 结果可核验性 5 | 论断 → 证据片段 → 原文定位 → 支持度判定 → 判定理由，整条链可复核 | 五段链完整；quote 经 `verify_quote` 校验；locator 可回到 `sources[].path` |
-| 质量增益 15 | 降低误支持与漏检 | 四级判定表 + 决策树 + 同输入复跑；误支持被硬性规则阻断；漏检通过 `counter_evidence_searched:true` 记录 |
-| 效率增益 5 | 单条论断从人工翻原文到核卡 | `search_scope` 记录扫描段落数；固定五步流程替代全文重读 |
-| 增益可验证性 5 | 同输入同文献同工具可复现 | 无随机、无外部网络；两次运行结果一致；`method_notes` 写判定口径 |
-| 新增能力 5 | 段落级定位、四级支持度、冲突并列、不确定性表达能力 | `result.verifications[]` 中体现；`conflict.both_sides`；`uncertainties[]` |
-| 方法改进 5 | 拆解粒度、证据检索、判定规则 | `references/decomposition-and-cards.md` / `references/verdict-rubric.md` 与实际结果一致 |
-| 创新证据 5 | 相对基础 Agent 或现有方案的边界和价值 | 运行记录中的 `reviewed_by_agent` 字段、`change_record`、误支持修正记录 |
-| 调用与易用性 3 | “帮我核验这句话”可触发；不属于本课题请求可拒绝 | 第 1 节边界；`errors` / `input_error` 清晰 |
-| 运行稳定性 4 | 长论文、跨页证据、扫描件、多语言文献、重复运行可持续产出 | 第 6 节异常分支；`result.status`；重复运行无随机 |
-| 异常处理 3 | PDF 无文本层、定位失败、证据冲突、部分匹配 | 所有异常均返回合法 `result.json`，退出码 0 |
-| 文档完整性 3 | 使用说明、四级定义、输入输出、配置、示例、限制 | 本文档 + `references/io-contract.md` |
-| 资源可复用性 4 | 证据卡片模板、拆解规范、标注规范可复用 | `references/decomposition-and-cards.md` + `references/verdict-rubric.md` |
-| 分享推广价值 3 | 沉淀可分享案例、标注经验 | 示例数据；运行报告可复用 |
+| `case.json` 坏 JSON / 缺失 | 记 `errors`，继续用目录其他材料；`case_id` 未知写 `UNKNOWN` | `partial` |
+| `claims-to-verify.json` 缺失但 `case.json` 有 claims | 用 `case.json` 内 claims | 正常 |
+| 无 claims 可读 | 不造论断，`verifications=[]`，写清原因 | `input_error` |
+| 材料缺失 / 损坏 / 格式不支持 | 登记 `degradations` + `gaps`，只使用可用材料 | `partial` |
+| PDF 无文本层 / 扫描件 / CID 乱码 | 不臆造原文；相关 claim 判 `insufficient_evidence`；建议 OCR | `insufficient_evidence` |
+| 图注缺失且不能读图 | 判 `insufficient_evidence`，不猜像素 | `partial` |
+| 证据冲突 | 双方并列，保留性判定 | 正常 |
+| 单个 claim 异常 | 记 `errors`，该条判 `insufficient_evidence`，其余继续 | `partial` |
+| 超时 / 请求不足 | 剩余标 `not_processed_budget`，保留已核验部分 | `partial` |
+| 需要 Office/幻灯片/图形但无法渲染 | 保留可编辑文件，写 `degradations`，提供文本/HTML 预览 | `partial` |
 
 ---
 
-## 11. 自检清单：提交前逐项检查
+## 8. 预算策略：64 次请求 / 900 秒
 
-- [ ] `result.json` 合法 JSON，`case_id` 与输入一致（或诚实标记 `UNKNOWN`）。
-- [ ] `output_contract` 每个键都出现在 `result.json` 顶层；缺失键已空值补齐并记录。
-- [ ] 每一条输入 claim 都有 `verdict`，且取值只在四级集合内。
-- [ ] 每个子判断有 `evidence`，或 `insufficient_evidence` 且 `search_scope` 非空。
-- [ ] 每条 quote 能在 `sources[].path` 对应文件中逐字检索到；无伪造原文。
-- [ ] 含比较/否定/显著的 claim，`comparator/negation/significance` 非空且与原文一致。
-- [ ] 冲突卡两侧都有 locator + quote，判定带保留。
-- [ ] `coverage` 计数自洽；未报告项在 `uncertainties`；需人工项在 `pending_human`。
-- [ ] 空输入 / 坏 JSON / 超时仍产出合法 partial，退出码 0。
-- [ ] 题面若要求可编辑 Office/幻灯片/图形产物，已附真实渲染的 PDF/PNG 预览。
-- [ ] Agent 核验过的项带 `reviewed_by_agent: true`，并写明改动依据；基线文件未被破坏。
-- [ ] 没有引用包内不存在的文件或脚本；本文档只引用 `scripts/verify_claims.py`、`scripts/lit_core.py` 和 `references/` 下现有文件。
+必须按权重分配：
+
+1. **先跑脚本基座**：1 次调用产生全套基线；确认 `/app/output/result.json` 已落盘所有 contract 字段。
+2. **读输入与合同**：3–6 次请求。
+3. **核验高权重证据**：所有 `supported` / `contradicted` 卡逐字核验，约 10–20 次；`insufficient_evidence` 只抽 margin 接近的。
+4. **回填 result.json**：4–8 次。
+5. **每完成一轮立即覆盖保存**，不要最后才写盘。
+6. 超时/请求不足：保留已核验部分，剩余标 `not_processed_budget`；永远返回合法 JSON 和退出码 0。
 
 ---
 
-## 12. 最小调用示例（示例数据，非正式案例结果）
+## 9. 与基础 Agent 的增益证据
 
-运行：
+不能自造评分。但必须在产物中留下可验证的增益证据：
 
-    python3 -B scripts/verify_claims.py --input /input --output /app/output
+- `search_scope`：记录每条 claim 扫描了多少段落/句子。
+- `counter_evidence_searched`：列入每个子判断，表示已主动找反面证据。
+- `reviewed_by_agent`：Agent 真正核验过的项标记为 true。
+- `change_record`：写明哪些基线误支持被修正到 `partially_supported` / `insufficient_evidence`。
+- `method_notes`：记录判定口径，确保重复运行可复现。
+- 不引用包内不存在的 `golden_standard`、`diff_report`、自评分数。
 
-输入（示例）：`case.json` 含 `case_id` / `output_contract`；`claims-to-verify.json` 一条论断“AA5052 在 300 °C 退火后的疲劳寿命高于 200 °C 退火试样。”；`paper.json` 含 4 段正文。
+---
 
-示意输出（示例）：该论断判 `contradicted`，证据为结果段原句“在 300 °C 条件下退火 4 h 后…疲劳寿命下降至 0.74×10^5 循环…”，`role=counter`，`locator={unit_id:P3, section:Results, page:5}`。
+## 10. Rubric 映射与自检
 
-完整示例与字段解释见 `references/io-contract.md
+| Rubric 维度 | 交付动作 |
+|---|---|
+| 任务完成度 | 每个 claim 有 verdict；每个子判断有独立判定；`claims_requested == claims_verified` |
+| 结果正确性 | quote 可逐字检索；四级判定符合 `references/verdict-rubric.md`；误支持被锚点门控挡住 |
+| 结果完整性 | 覆盖事实/比较/因果/范围；正反证据；冲突双方；限制条件 |
+| 结果可核验性 | 五段链完整：论断→证据片段→原文定位→支持度→理由 |
+| 质量增益 | 四级判定表 + 锚点门控 + 主动找反面证据 |
+| 效率增益 | 脚本基座 + 固定五步 + `search_scope` |
+| 增益可验证性 | 无随机、离线、可复跑；`method_notes` |
+| 新增能力 | 段落级定位、四级支持度、冲突并列、不确定性表达 |
+| 方法改进 | 拆解粒度、证据检索、判定规则与 `references/` 一致 |
+| 创新证据 | `reviewed_by_agent`、`change_record`、误支持修正记录 |
+| 可靠性 | 异常表全处置；退出码 0；合法 partial |
+| 生态贡献 | 使用 `references/io-contract.md`、`references/decomposition-and-cards.md`、`references/verdict-rubric.md`；示例输入/输出 |
+
+提交前逐项核对 Section 4 和 Section 5 的完整链。
+
+---
+
+## 11. 最小调用示例（示例，非正式案例）
+
+```bash
+python3 -B scripts/verify_claims.py --input /input --output /app/output
+```
+
+示例输入：`case.json` 含 `case_id` 与 `output_contract`；`claims-to-verify.json` 一条论断“AA5052 在 300°C 退火后的疲劳寿命高于 200°C 退火试样。”；材料含 4 段正文。
+
+示意输出：该论断判 `contradicted`，证据为结果段原句“在 300°C 条件下退火 4 h 后……疲劳寿命下降至 0.74×10^5 循环……”，`role=counter`，`locator={unit_id:P3, section:Results, page:5}`。
+
+完整字段解释见 `references/io-contract.md`。

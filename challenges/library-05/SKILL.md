@@ -1,207 +1,300 @@
 ---
 name: library-annotation-sediment
-description: Repair a research file library and turn reading annotations into traceable, searchable notes. Scans real PDF/DOCX/HTML/text materials, extracts highlight/underline/margin/handwriting annotations with page- and character-level anchors, inventories files with sha256 and provenance-tagged metadata, resolves duplicates and version chains by content hash and administrative version notes, links annotations to structured notes, builds a searchable index, answers the case search questions, and emits result.json plus inventory.csv, operations.log, version_chain.json with honest errors/degradations. Use when a task supplies a library/ or materials directory of documents and asks for annotation extraction, note sedimentation, duplicates/versions, an inventory, or library repair. The ship has been tuned for the Bohrium Agent Skill competition: it first runs the included deterministic baseline, then requires the Harness Agent to personally read the actual materials, verify evidence, and enhance the deliverables before finalizing.
-version: 0.2.0
+description: Repairs a research file library and turns reading annotations into traceable, searchable deposition notes. Use when the task supplies /input/case.json, /input/task.md and a materials directory, and asks for annotation extraction, metadata inventory, duplicate/version handling, knowledge linking, or search. Runs one command: init, build, selfcheck. It first produces a deterministic stdlib baseline with detailed source locators, then requires the Harness Agent to read real files and enhance a draft before finalizing. All deliverables keep honest status, sha256, source refs, errors, degradation and pending_human records.
+version: 3.0.0
 ---
 
-# library-annotation-sediment
+# 阅读批注与知识沉淀：科研资料整理，也保留版本关系
 
-一个用于“阅读批注与知识沉淀：科研资料管理，整理文件，也保留版本关系”的 Skill。它先运行包内确定性脚本产出完整基线交付物，然后要求 Harness Agent 亲自读取 `/input` 中的真实材料、核验原文引用、批注定位、哈希与版本链，并在基线上增强写出可复核的 `/app/output/result.json` 与全部相关文件。
+本 Skill 是“阅读批注与知识沉淀”任务的执行入口。它把科研材料从散落的批注、笔记、文件和版本关系中整理成可复核、可检索、可交接的结构化结果。核心目标不是“抽得多”，而是每条批注都能回到原文的具体页与位置，每条笔记论断都能指到原文片段，沉淀条目能被真实问题检索到，并能被他人复跑核对。
 
-脚本只是工具，最终交付物由你（Harness Agent）亲自读材料、推导、撰写/制作。禁止把脚本生成的骨架、模板或中间 JSON 直接当最终成品。你必须在基线上完成真实核验、修正、补充并留下可复跑证据。
+## 0. 最高优先级：单命令全流程入口
 
-## 0. 运行时契约与硬性要求
+Agent 进入案例后，第一步必须直接运行：
 
-- 输入位置：`/input/case.json`、`/input/task.md`，以及题面规定的材料目录（PDF、DOCX、XLSX、CSV、HTML、TXT、图片等）。
-- 工作目录：`/app/work`；最终产物必须落在 `/app/output`。
-- 最终必须有 `/app/output/result.json`，包含 `case_id` 和原 `output_contract` 中提取的全部字段（键名不改），未知字段写 `value: null`；同时保留原始 `output_contract`。
-- 若产生可编辑 Office、幻灯片、图等产物，必须额外生成真实渲染的 PDF/PNG 预览；无法渲染时要在 `errors`/`pending_human` 中如实说明。
-- 预算：64 次模型请求 / 900 秒 / 单次响应 16384 tokens（含推理）。必须预算感知：先产出 honest partial，优先完成 rubric 权重最高的交付物，再增量改进。
-- 诚实性：`status`、`sources`、`uncertainty`、`changes` 必须真实；材料缺失、解析失败、不确定一律显式标注，不得编造数据、引用、分数。
-- 资源限制：Skill 最多 50 个 UTF-8 文本文件、单文件 ≤500KB、总 ≤2MB、无 symlink。脚本与文档不能包含预制答案或正式案例结果。
+`python3 -B scripts/main.py run --input /input --output /app/output --work /app/work`
 
-## 1. 核心原则：先跑基线，再亲自复核增强
+该命令内部严格按三个阶段执行，并不会依赖模型请求：
 
-1. **必须第一步运行基线脚本**：进入任务后，立即执行：
-   `python3 -B scripts/main.py --input /input --output /app/output --work /app/work`
-   该脚本会确定性产出全套基线：`result.json`、`inventory.csv`、`operations.log`、`version_chain.json`、`annotations.json`、`notes.json`、`index.json`，并回填 `output_contract` 字段。
-2. **保留全部基线产物**：后续 Agent 只能修订或新增，不得删除、清空、覆盖任何基线与契约字段。若发现脚本结果可疑，保留原值并在 `changes`/`summary` 中记录 `reviewed_by_agent`。
-3. **Agent 亲自核验**：在基线之上，你必须读取实际材料并核验关键论断、数字、引用、定位、来源一致性，把核验结论写进 `result.json`（`verified`、`pending_human`、`conflicts`、`limitations`）。
-4. **不要只跑脚本就结束**：脚本是 stdlib 基线，不能证明你真正读过材料。高分的“genuinely-derived solution”要求你在结果中留下亲自阅读与推导的证据。
+1. `init`：扫描 `/input`，盘点文件、目录、权限、哈希、来源编号 `S#`、候选批注、候选冲突分组；生成 `/app/work/ledger.json` 和候选抽取结果。
+2. `build`：校验当前 `/app/work/draft.json`；如果没有 draft，则用 init 台账做确定性兜底抽取，生成实质工作稿；再渲染全部产物并 finalize `/app/output/result.json`。
+3. `selfcheck`：检查产物与 `output_contract` 字段、磁盘文件、来源引用格式是否一致。
 
-## 2. 本题专属执行流程
+这个命令必须在 900 秒预算内很少的模型请求下也能产出完整、合法、可复核的 partial/full 交付物。任何异常都必须捕获，并最终写合法 `result.json`，退出码为 0。
 
-### 步骤 1：盘点输入
+## 1. Agent-first 双路径工作流
 
-- 输入：`/input/case.json`、`/input/task.md`、材料目录树。
-- 动作：
-  1. 读取 `/input/case.json`；若缺失，递归搜索 `**/case*.json`；仍失败则记录 `input_error`。
-  2. 读取 `/input/task.md`，提取任务说明、限制、评分证据范围。
-  3. 从 `case.json` 中提取 `case_id`、`output_contract`（键名语义可兼容：`output_contract`/`contract`/`output_schema`）、`task_instruction`、检索问题/询问字段（`query`/`question`/`search_query`/`ask`）。
-  4. 递归遍历 `/input/**`，用扩展名 + magic bytes 识别文件类型，绝不依据文件名或领域标签猜测内容。
-- 输出：文件清单、输出契约、检索问题列表、风险提示。
-- 失败分支：`case.json` 缺失或不可解析 → 继续扫描所有材料；`status` 设为 `partial` 或 `insufficient_evidence`；错误写入 `errors`，待人工项写入 `pending_human`；最终仍 exit 0。
+### 路径 A：推荐路径（Agent 真读增强）
 
-### 步骤 2：用工具真实解析材料
+1. 先运行一次单命令全流程，拿到基线产物。
+2. 读取 `/input/case.json`、`/input/task.md` 和 `/app/work/ledger.json`，确认 `case_id`、`output_contract` 字段、任务边界、检索问题。
+3. 真实阅读 `/input` 中的材料，优先处理高价值对象：PDF 高亮/批注、DOCX comments/修订、重复文件、版本链、搜索问题直接涉及的文件。
+4. 把判断写入 `/app/work/draft.json`。不要直接手改 result.json 或结构化 JSON；所有核验与新增判断都通过 draft 进入 build。
+5. 重新运行：
+   `python3 -B scripts/main.py run --input /input --output /app/output --work /app/work --draft /app/work/draft.json`
+6. 检查 selfcheck 输出，补齐缺失字段和 pending_human 项；最后再运行一次 run 固化。
 
-- 输入：步骤 1 得到的材料文件列表。
-- 动作：
-  1. 对每个 PDF：优先调用平台提供的 `pdf-text-tool`（如果可用）或系统 PATH 中的 `pdftotext -layout`；若这些不可用，退回包内 `python3 -B scripts/docext.py` 的 PDF 提取逻辑。必须提取真实文本层、页码、字符级锚点信息；对没有文本层的扫描件，使用可用的 OCR 工具；无 OCR 时保留文件并标记 `anchor_unresolved`、`scanned_pdf`，写入 `pending_human`。
-  2. 对 DOCX：用 `scripts/docext.py` 或环境中的 `python-docx` 提取正文、comments、高亮/批注位置。
-  3. 对 XLSX/CSV：提取行列文本，记录 sheet/表头/源文件。
-  4. 对 HTML/TXT：按 UTF-8 提取文本或 DOM 文本。
-  5. 任何材料实际不可读、加密、损坏、格式不支持 → 不猜测内容；记录 `skipped` + `pending_human`。
-- 输出：各文件可核验的文本层、页号、坐标、批注类型/颜色/作者/时间、错误与降级记录。
-- 失败分支：单文件解析失败 → 只把该文件降级，其他文件继续；不要整体失败。解析工具全部缺失 → 基线脚本仍可生成部分内容，但你必须在 `limitations` 中说明哪些文件未被真实读取。
+### 路径 B：无 draft 时确定性兜底
 
-### 步骤 3：构建/核对证据
+如果 Agent 未能写入 draft，`build` 必须使用 init 台账的确定性抽取结果生成实质工作稿，而不是空模板。兜底结果中每条 annotation/note 仍必须包含：
 
-- 输入：脚本基线产物 + 步骤 2 的真实解析结果。
-- 动作：
-  1. 对每份文件：核验 `id/path/sha256/size/mtime/mode/readable/type`，与实际文件一致；不一致时以实际为准并记录修正。
-  2. 对重复文件：基于 sha256 字节级哈希分组；其他疑似重复只标记 `duplicate_of`，不删除任何文件。
-  3. 对版本链：按文件名去除版本/draft 标签 + 版本标签/日期 + mtime 排序，形成 `supersedes` 边；文件名本身不能当证据，依据要写入 `basis`；不确定标 `uncertain`。
-  4. 对每条 annotation：核验 `quote` 是否在原文中真实存在，`locator`（page + char_start/end + rect）是否落在源文件页内；若脚本定位漂移，手工修正或用文本重定位；无法确认则标 `anchor_unresolved`。
-  5. 对每条 note：核验其 evidence 的 `file/page/quote/precision/locator/annotation_id` 是否可回溯；没有原文支撑的论断不得写成确定结论。
-  6. 对每个 search 问题：执行真实检索，记录 `query → matched_notes/files → shared terms`；词汇缺口标 `no_recall`，绝不能把无结果写成没有答案。
-- 输出：证据核验后的 `inventory`、`duplicates`、`version_chain`、`annotations`、`notes`、`links`、`search`、`verification` 增强。
-- 失败分支：核验发现冲突 → 写入 `conflicts` 与 `pending_human`，保留原脚本值。
+- `source_ref`：`S#`
+- `quote`：从原文中逐字抽取的片段
+- `locator`：`文件#页码/段落号/行号`
+- `status`：`auto_extract`
+- `confidence`：保守估计，如 `medium` 或 `low`
 
-### 步骤 4：Agent 产出完整成品
+兜底路径还必须把 `AUTO_EXTRACT` 诚实写入 `gaps`、`degradations` 或 `methods`，说明哪些结果尚未经过 Agent 人工核验。最高分的关键不是假装人工核验，而是即使没有 draft 也有可用的确定性结果，同时把未核验状态如实登记。
 
-- 输入：步骤 3 核验后的基线产物与材料。
-- 动作：
-  1. 补齐 `/app/output/result.json` 的所有规定字段，加上 `case_id` 与 `output_contract` 全部字段。
-  2. 保证 `sources`、`artifacts`、`runtime`、`summary`、`contract_fill` 反映实际工作，而不是脚本占位。
-  3. 如果 `output_contract` 要求可编辑 Office/slide/diagram 产物，用 `libreoffice --headless` 或等价工具真实渲染 PDF/PNG 到 `/app/output`，并把预览路径写入 `artifacts`；渲染失败写入 `errors` 和 `pending_human`。
-  4. 在 `changes` 或新增的 `reviewed_by_agent` 字段中记录 Agent 亲自核验了哪些文件、哪些 quote/locator/hash 经过人工核对；保留 `verified`/`pending_human`/`conflicts` 证据。
-  5. 完成后写一次 final `result.json`；partial 状态必须列出缺失项，不要把未完成写成完成。
-- 输出：完整、可复核的 `/app/output` 交付物套件。
-- 失败分支：任何材料不足或无法确认 → `status` 设为 `partial` 或 `insufficient_evidence`，`pending_human` 列出具体 action；仍 exit 0。
+## 2. 目录与运行契约
 
-### 步骤 5：自检 rubric 与回填 result.json
+- 输入：`/input/case.json`、`/input/task.md`，以及题面规定的材料目录。
+- 工作：`/app/work`，用于 ledger、draft、候选件、临时文件。
+- 输出：`/app/output`，必须包含最终 `result.json` 和所有契约要求的可交付物。
+- 运行时：python3 >= 3.8，标准库优先，离线可用，不依赖未声明外部服务。
+- 资源上限：50 个 UTF-8 文本文件，单文件 ≤500KB，总计 ≤2MB，无 symlink。
+- 预算：64 次模型请求 / 900 秒 / 单次响应 16384 tokens。因此先跑脚本，再增量增强，不要重复解析每份文件。
 
-- 输入：当前 `/app/output` 文件与 `output_contract`。
-- 动作：
-  1. 逐项检查本文第 6 节 rubric 对照表。
-  2. 检查 `result.json` 的键是否包含所有 `output_contract` 字段 + `case_id`；未知字段写 `null`。
-  3. 检查磁盘文件列表与 `result.json.artifacts` 一一对应；缺文件先补齐或标注。
-  4. 检查 `errors`/`degradations`/`pending_human` 与真实失败一致。
-  5. 回填 `status`、`sources`、`uncertainty`、`changes`、`runtime`、`contract_fill`。
-- 输出：最终提交就绪的 `/app/output`。
-- 失败分支：发现缺失字段或文件 → 先补齐再收尾；如果时间到 720 秒还差，写一个明确列出缺失项的 partial `result.json`（exit 0）。
+## 3. 产出清单
 
-## 3. 预算策略：64 次模型请求 / 900 秒内如何分配
+至少生成并校验以下文件；若 `output_contract` 要求额外文件，必须补齐：
 
-按 rubrics 权重优先：实际效果（40 分）> 使用增益（25 分）> 创新增益（15 分）> 可靠体验（10 分）> 生态贡献（10 分）。
+- `/app/output/result.json`：主结构化结果，双回显契约字段。
+- `/app/output/inventory.csv`：来源文件清单、哈希、大小、类型、权限、来源、目录层级。
+- `/app/output/annotations.jsonl`：逐条批注及原文定位。
+- `/app/output/notes.jsonl`：结构化笔记条目。
+- `/app/output/links.jsonl`：笔记、批注、文献、作者、方法、项目之间的可解释关联。
+- `/app/output/version_chain.json`：版本关系和重复文件判定。
+- `/app/output/duplicates.json`：重复文件分组与依据。
+- `/app/output/search_index.json`：可检索索引。
+- `/app/output/search_answers.json`：案件中检索问题的回答与召回记录。
+- `/app/output/operations.log`：操作、文件哈希、脚本版本、变更、失败与恢复。
+- `/app/output/evidence_citations.md`：关键数字与论断的 `[S#]` 引用表，供人工复核。
+- 若契约要求可编辑 Office、幻灯片、图，必须同时渲染出 `pdf`/`png` 预览，否则在 `errors` / `pending_human` 中说明。
 
-- **必须做（约前 10 次请求）**：读 `case.json` 和 `task.md`；运行基线脚本；确认 `output_contract` 字段。
-- **重点做（约 15–25 次请求）**：真实解析关键材料，特别是 PDF/DOCX 批注。优先处理高价值文件：含批注、版本链、重复文件、检索问题涉及的文件。不要对每个文件都做同样深度的解析。
-- **核验与增强（约 15–20 次请求）**：抽查或全量核验 annotation/note 的 quote 与 locator；修正明显错误；补齐结果 JSON 的关键证据。
-- **可跳过或压缩**：对纯文本、CSV 等低风险文件只做轻量核验；对非关键元数据不逐项重算；不进行无收益的多轮循环。
-- **尽早落盘 partial**：脚本跑完立即保证 `/app/output/result.json` 已存在；之后每次增强都及时覆盖写回。
-- **720 秒前**：进行完整性自检，若发现缺失项立即补齐 partial 并标记。
-- **900 秒前**：无条件写最终 `result.json`，exit 0。
+## 4. 来源引用与可核验性规则
 
-## 4. 隐藏案例鲁棒性
+所有关键数字、原文引用、笔记论断、关联、检索命中都必须带有来源和定位：
 
-任何情况下都要产出合法 `result.json` 且退出码为 0。降级策略：
+- 来源编号：`S1`, `S2`, ...，由 init 分配，一旦分配不因后续文件新增而重排；若有变动必须写入 `changes`。
+- `source_ref`：指向来源编号。
+- `locator`：优先使用 `S#@p3¶2`、`S#@line42-48`、`S#@sheet=Sheet1!A1:D10` 或 `S#@page2&rect=x1,y1,x2,y2`。
+- `quote`：必须是原文中存在的逐字片段；若短片段不唯一，需增加上下文 `quote_context` 并标注 occurrence index。
+- 文件级可核验性：每个文件都记录 `sha256`、`size`、`mtime`、`mode`、`readable`、`type`、`source_path`。
+- 所有关键论断在正文或 `evidence_citations.md` 中必须出现 `[S#]` 和 locator，不允许只有一句“见材料”。
 
-| 情况 | 处理 |
+## 5. draft.json 形状和工作流
+
+`/app/work/draft.json` 是 Agent 与脚本之间的唯一判断接口。Agent 不得覆盖生成后的 result.json 结构；应写入 draft 再重跑 build。
+
+推荐字段：
+
+- `case_id`
+- `source_assignments`：`{"S1": {"path": "...", "type": "pdf", "sha256": "..."}}`
+- `annotations`：`source_ref`, `page`, `locator`, `quote`, `type` (highlight/underline/margin/handwriting/webclip/temp), `color`, `author`, `created`, `status` (verified/auto_extract/uncertain), `confidence`
+- `notes`：`note_id`, `type` (question/method/conclusion/reusable/uncertain), `claim`, `evidence` (数组，每项含 `source_ref`, `locator`, `quote`), `tags`, `confidence`, `status`
+- `links`：`from_id`, `to_id`, `relation`, `shared_terms`, `basis`, `strength`
+- `duplicate_decisions`：`group_id`, `hash_match`, `duplicate_of`, `basis`
+- `version_decisions`：`current_id`, `supersedes`, `basis`, `status` (certain/uncertain)
+- `search_answers`：`query`, `matched_note_ids`, `matched_file_ids`, `shared_terms`, `missing_terms`, `no_recall`, `answer`
+- `conflicts`：冲突项和未解决原因
+- `pending_human`：需要人工确认的项目
+- `methods`：本次采用的方法和局限
+
+Agent 若发现脚本抽取的 quote 错位、页码错误、版本判断不成立，应把正确项写入 draft 的 `annotations` / `version_decisions`，并在 `changes` 中注明 `agent_corrected_locator` 或 `agent_corrected_version`。
+
+## 6. result.json 双回显契约
+
+`result.json` 必须做到：
+
+1. 所有 `output_contract` 字段，包括 `case_id`，在顶层出现一次，且在 `output_contract` 嵌套对象中出现一次。
+2. 未知/缺失契约字段的值写 `null`，不能用空字符串掩盖。
+3. 顶层包含 `status`、`sources`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`artifacts`、`summary`、`contract_fill`、`methods`。
+4. `status` 只允许使用：`ok`、`partial`、`insufficient_evidence`、`input_error`。
+5. `sources` 中每条来源包含 `source_id`、`path`、`sha256`、`type`、`size`、`readable`、`note`。
+6. `contract_fill` 记录每个契约字段由哪条流水线生成：`init`、`build`、`agent_draft`、`fallback`、`not_available`。
+7. `changes` 必须记录基线产出和 Agent 增强的差异证据，例如：
+   - `baseline_annotation_count`
+   - `agent_verified_count`
+   - `agent_added_note_count`
+   - `agent_corrected_locator_count`
+   - `fallback_auto_extract_count`
+   - `contract_missing_fields`
+   不要写任何平台分数或基准分数。
+
+如果契约字段与保留字段同名，嵌套 `output_contract` 中保留契约原键，顶层用保留键承载元数据，并在 `contract_fill` 中注明碰撞。
+
+## 7. 批注抽取与笔记结构化规则
+
+### 7.1 批注抽取
+
+- 区分类型：高亮、划线、页边批注、手写批注、网页剪藏、临时笔记。
+- 保留颜色、作者、时间、页号、坐标、所属文件、类型标签。
+- PDF：优先使用系统或平台可用工具提取真实文本层、页号和坐标；不可用时退回 `scripts/docext.py`。无文本层扫描件必须标 `scanned_pdf`、`anchor_unresolved`，不得编造 OCR 文本。
+- DOCX：提取正文、comments、批注位置和作者。
+- HTML：提取正文或剪藏文本，保留原始 URL 或来源。
+- 图片/手写：不假装识别；如无 OCR，写入 `pending_human` 并保留文件。
+- 锚点校正：当 quote 能在源文件中找到，但 locator 漂移时，以实际文本位置重新定位；无法确定时标 `anchor_unresolved`。
+- 每条批注的 `quote` 必须能从来源文件真实找到。验证失败不能写成成功。
+
+### 7.2 笔记结构化
+
+笔记不是摘抄，而是有判断的结构化条目。建议 schema：
+
+- `type`：`question` / `method` / `conclusion` / `reusable` / `uncertain`
+- `claim`：一句话判断
+- `evidence`：至少一个原文 quote 和 locator
+- `annotation_ids`：对应批注条目
+- `tags`：主题、实体、方法、时间
+- `confidence`：`high` / `medium` / `low`
+- `status`：`verified` / `auto_extract` / `pending_human`
+
+没有原文支撑的论断必须标为 `uncertain` 或 `pending_human`，不得写成确定结论。
+
+## 8. 知识关联与版本/重复处理
+
+### 8.1 知识关联
+
+- 关联可以在批注、笔记、文献、作者、方法、项目之间建立。
+- 每条关联必须有依据：共享的实体/术语、共引用、共同来源文件、同一方法术语等。
+- 仅共享一个宽泛术语不得作为强关联；过度连接要降级为 `weak` 或丢弃。
+- `links.jsonl` 中每条记录包含 `basis` 和 `shared_terms`，不能只有 `related_to`。
+
+### 8.2 重复文件
+
+- 用字节级 `sha256` 对重复文件分组，标记 `duplicate_of`。
+- 不删除、不移动原文件。
+- 若文件名相似但哈希不同，只写 `suspected_duplicate` 并记录依据，不强制合并。
+
+### 8.3 版本链
+
+- 版本判断不能只看文件名。文件名只是线索，必须结合 `mtime`、日期标签、版本号、内容哈希、题面管理性版本说明。
+- 去除 `final`, `draft`, `v1`, `v2`, `copy`, `副本`, `-final`, `-v\d+` 等规范化后再分组。
+- 生成 `supersedes` 边，并写 `basis`；不确定标 `uncertain`。
+- 不要把“文件名相似”当确证。
+
+## 9. 检索入口
+
+- 构建 `search_index.json`，支持按主题、标签、实体、来源文件、作者、时间检索。
+- 对案件中的每个检索问题，在 `search_answers.json` 中回答：
+  - `query`
+  - `matched_note_ids`
+  - `matched_file_ids`
+  - `shared_terms`
+  - `missing_terms`
+  - `no_recall`
+  - `answer`
+- `no_recall` 是词汇缺口，不是“没有答案”。应写出缺失词，让结果可整改。
+- 检索命中也必须有来源引用，不得给无依据的语义答案。
+
+## 10. 失败、冲突与恢复
+
+任何文件解析失败、加密、损坏、权限不足、无文本层、OCR 低置信度，都必须：
+
+- 不中断整体流程。
+- 保留已获取的 `sha256` / `size` / `type` / `path`。
+- 写入 `errors`、`degradations`、`pending_human` 中。
+- 在 `operations.log` 中记录尝试的方式、失败原因、恢复或跳过策略。
+- 若问题来自旧版本批注或重复文件，写入 `conflicts`，不要强行归并。
+- 最终 status 必须诚实：材料不足写 `insufficient_evidence`，部分完成写 `partial`。
+
+## 11. 隐藏案例鲁棒性
+
+| 情况 | 应对 |
 |-|-|
-| `/input/case.json` 缺失或无法解析 | `errors` + `pending_human`；仍扫描全部文件；`status`=`partial` 或 `insufficient_evidence`；exit 0 |
-| `output_contract` 缺失或为空 | 保留默认字段集；`contract_fill` 记录无法回填；`status`=`partial`；exit 0 |
-| 材料文件缺失或空目录 | `status`=`insufficient_evidence`；`errors` 记录无材料；仍生成合法 result.json 与空 artifacts；exit 0 |
-| 文件加密/损坏/无法读取 | 保留可获取的 size/hash，类型标 unknown；`skipped` + `pending_human` |
-| PDF 为扫描件无文本层 | 保留文件；`anchor_unresolved`；`pending_ocr`；不编造文本；exit 0 |
-| OCR 置信度低 | 标 `uncertain`，锚点置 `pending_human`，不修改原文 |
-| 单文件解析失败 | 只降级该文件，不中断整体 |
-| 时间即将用尽 | 立即写 partial `result.json`，列出缺失项，exit 0 |
-| 工具缺失（如 pdf-text-tool、libreoffice） | 退回 `scripts/docext.py`；仍失败则写 `limitations`，不做伪结果 |
-| 版本链同名/同日期不确定 | 标 `uncertain`；不强制排序；不删除 |
-| 重复文件 | 标 `duplicate_of`，绝不删除、移动原文件 |
-| 检索无结果 | `no_recall` 是词汇缺口，不是“没有答案” |
+| `/input/case.json` 缺失或无法解析 | 读取 `task.md`，继续扫描材料；`errors` 记录；`status=partial` 或 `input_error`；仍 exit 0 |
+| `output_contract` 缺失或为空 | 使用默认契约字段；`contract_fill` 记录；status 诚实 |
+| 材料目录为空 | `status=insufficient_evidence`；合法 result.json；空 artifacts；exit 0 |
+| 单个 PDF/DOCX 损坏或加密 | 保留可获取元数据；`skipped` + `pending_human`；其他文件继续 |
+| PDF 为扫描件无文本层 | `anchor_unresolved`；`scanned_pdf`；不伪造文本 |
+| OCR 置信度低 | `confidence=low`；锚点 pending；不修改原文 |
+| 时间即将用尽 | 立即写 partial result.json，列出 missing fields，exit 0 |
+| 检索无结果 | `no_recall`；列出 `missing_terms` |
+| 版本关系不确定 | `status=uncertain`；不强制排序 |
+| 重复文件 | 标记 duplicate_of；不删除 |
 
-## 5. 输出契约与目录约定
+## 12. 预算分配
 
-### 输入目录
+- 第 1 次模型请求前后：读取 case.json/task.md，运行单命令全流程。
+- 前 10 次请求：确认契约、来源编号、产物路径；检查基线 result.json 是否合法。
+- 第 10–30 次请求：针对性阅读高价值文件，写入 draft；不要逐文件均等深入。
+- 第 30–45 次请求：重跑 build，检查 selfcheck；补齐 pending_human 和修改注记。
+- 第 45 次请求后：只做合法性和完整性收尾；720 秒前必须已有 partial；880 秒前无条件 finalize 并 exit 0。
 
-`/input/case.json`、`/input/task.md`、`/input/**` 材料。
+## 13. Rubric 维度到产物证据映射
 
-### 工作目录
+### 实际效果 40 分
 
-`/app/work` 用于临时文件；最终可交付物写在 `/app/output`。
+- 任务完成度：`annotations.jsonl`、`notes.jsonl`、`links.jsonl`、`search_answers.json` 非空且来自真实文件。
+- 结果正确性：每条 annotation/note 有逐字 `quote` 和 `locator`；result 中验证状态清晰。
+- 结果完整性：`inventory.csv` 覆盖文件类型、权限、来源、哈希、目录层级；`duplicates.json` 和 `version_chain.json` 覆盖重复与版本。
+- 结果可核验性：`sha256`、`operations.log`、`scripts/main.py` 版本、`[S#]` 引用完整。
 
-### 脚本调用
+### 使用增益 25 分
 
-```
-python3 -B scripts/main.py --input /input --output /app/output --work /app/work
-```
+- 质量增益：draft 中 Agent 核验结果 vs 脚本基线，记录在 `changes`。
+- 效率增益：`notes.jsonl` 直接可检索，`search_index.json` 可自动化命中；减少人工重排。
+- 增益可验证性：`changes` 中给出基线 count、Agent verified count、corrected locator count 等差异，不编造分数。
 
-基线脚本会先写一个 partial `result.json`，异常捕获，最后无条件覆盖 final `result.json`，退出码始终 0。脚本本身不产生模型请求。
+### 创新增益 15 分
 
-### `result.json` 必须包含的字段
+- 新增能力：贯通“批注抽取 → 笔记结构化 → 关联 → 检索”，且保留原始锚点。
+- 方法改进：锚点重定位策略、版本规范化、evidence 链接、no_recall 处理。
+- 创新证据：`methods` / `summary` 写清方法边界，不用空话；每条改进都可在产物中检查。
 
-`case_id`、`status`（`ok`、`partial`、`insufficient_evidence`、`input_error`）、`sources`、`artifacts`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`inventory`、`duplicates`、`version_chain`、`annotations`、`notes`、`links`、`search`、`recovery`、`summary`、`contract_fill`，加上从 `output_contract` 提取的全部字段（键名不改，未知字段置 `null`）。原始 `output_contract` 保留在 `output_contract` 字段下。此外可以加入 `reviewed_by_agent`、`verification`、`conflicts` 等增强字段，但不得删除原字段。
+### 可靠体验 10 分
 
-### 侧产物文件
+- 调用易用：单命令即全流程；`/app/output/result.json` 始终存在。
+- 运行稳定：同一输入重复运行结果确定；异常不中断。
+- 异常处理：加密、损坏、无文本层、权限不足、旧版本、重复文件均有明确 `errors` / `pending_human`。
 
-基线脚本产物至少包括：`/app/output/inventory.csv`、`/app/output/operations.log`、`/app/output/version_chain.json`、`/app/output/annotations.json`、`/app/output/notes.json`、`/app/output/index.json`。如果 `output_contract` 要求其他文件名，Agent 必须补齐。
+### 生态贡献 10 分
 
-## 6. Rubric 维度 → 交付要求 → 自证方式对照表
+- 文档完整：本 SKILL.md 已覆盖调用、输入、输出、异常、schema、自检。
+- 资源可复用：标准库脚本可复跑，输入输出约定清晰。
+- 分享价值：来源引用、研究方法、局限性写入 `methods`；不依赖私有账号或个人手工操作。
 
-| Rubric 维度 | 交付要求 | 自证方式 |
-|-|-|-|
-| 任务完成度 15 分 | 跑完“批注抽取—笔记结构化—关联—入库/检索”闭环，交付可用结果 | `result.json` 的 `annotations`、`notes`、`links`、`search` 非空且来自真实材料；`summary` 描述闭环 |
-| 结果正确性 15 分 | 原文片段、页码、位置与文件一致；笔记论断有原文支撑；关联有依据 | 每条 annotation/note 有 `quote`+`locator`；`verification` 中 `quote_in_source=true`；`links` 标 `shared_terms`；错误在 `errors` |
-| 结果完整性 5 分 | 覆盖各类批注、关键元数据、文件类型、目录层级、重复文件、版本差异、权限与来源 | `inventory` 字段完整；`duplicates`、`version_chain`、`sources` 覆盖关键文件 |
-| 结果可核验性 5 分 | 抽取、笔记、关联、入库可复跑核对 | `sha256`、`locator`、`quote`、`operations.log`、`script version` |
-| 质量增益 15 分 | 相同材料下批注抽取准确率、笔记可用性、关联有效性提升 | 基线与 Agent 增强对比记录在 `changes`；标注哪些字段由 Agent 修正 |
-| 效率增益 5 分 | 把批注整理成可检索笔记所需人工修改量下降 | `notes` 结构化程度高，可直接检索；`index` 有效 |
-| 增益可验证性 5 分 | 同输入对照证明改善 | `changes` 记录“脚本基线 → Agent 修正”的差异；不用编造分数 |
-| 新增能力 5 分 | 形成基础 Agent 不易稳定实现的能力 | `anchor对齐`、`跨版本`、`批注到笔记到检索` 贯通，记录方法 |
-| 方法改进 5 分 | 锚点对齐、笔记 schema、关联判定、检索入口有实质改进 | `notes` schema 含 question/method/result/limitation/reusable；`links` 依据明确；`search` 词汇缺口策略 |
-| 创新证据 5 分 | 证明创新点相对基线价值与边界 | `summary`/`changes` 说明方法优势、边界；不吹嘘 |
-| 调用与易用性 3 分 | 给定材料目录能正确触发，能按说明复现 | 本文档的调用步骤最小示例；`scripts/main.py --help` 可运行 |
-| 运行稳定性 4 分 | 不同文件类型、页数、版式、重复运行持续可用 | 确定性脚本 + 实际解析记录；`errors` 少且诚实 |
-| 异常处理 3 分 | 加密、损坏、无文本层、OCR低置信度、旧版本、重复、权限不足识别处置 | `errors`、`degradations`、`pending_human` 覆盖 |
-| 文档完整性 3 分 | 使用说明、依赖、输入输出约定、schema、示例、维护信息齐全 | 本文档第 0–7 节 |
-| 资源可复用性 4 分 | 批注抽取脚本、结构、规则可复用复跑 | 包内 `scripts/main.py`、`scripts/docext.py` 无外部依赖 |
-| 分享推广价值 3 分 | 沉淀可分享案例、schema、方法价值 | `README` 说明 + `SKILL.md` 方法与局限 |
+## 14. 提交前自检清单
 
-## 7. 自检清单（提交前逐项检查）
+1. 已运行 `python3 -B scripts/main.py run --input /input --output /app/output --work /app/work`。
+2. 已读取 `/input/case.json` 和 `/input/task.md`，确认 `case_id` 和 `output_contract`。
+3. 已真实阅读关键材料，而非仅凭文件名。
+4. `result.json` 合法且包含双回显契约字段。
+5. 所有 quote 可在原文中找到，locator 归属正确；不确定项已标 `anchor_unresolved`。
+6. 所有文件哈希、重复、版本链依据真实，无编造。
+7. `inventory.csv`、`annotations.jsonl`、`notes.jsonl`、`links.jsonl`、`search_index.json`、`version_chain.json`、`operations.log` 均已生成。
+8. `errors`、`degradations`、`pending_human` 与真实失败一致。
+9. `status` 诚实；不把未完成写成 `ok`。
+10. 退出码为 0，`result.json` 存在且可解析。
+11. 没有 `__pycache__`、`.pyc`、symlink。
+12. 没有写任何正式案例预先生成的答案。
 
-1. 已运行 `python3 -B scripts/main.py --input /input --output /app/output --work /app/work` 产生基线。
-2. 已真实读取 `/input/case.json` 和 `/input/task.md`，提取 `case_id` 与 `output_contract` 全部字段。
-3. 已用 `pdf-text-tool` 或 `scripts/docext.py` 等工具真实解析了关键材料，没有凭文件名猜测内容。
-4. `result.json` 包含 `case_id`、`status`、`sources`、`artifacts`、`uncertainty`、`pending_human`、`errors`、`degradations`、`changes`、`runtime`、`inventory`、`duplicates`、`version_chain`、`annotations`、`notes`、`links`、`search`、`recovery`、`summary`、`contract_fill`。
-5. `result.json` 对 `output_contract` 每个字段都有回填（未知字段 `value: null`），且原始 `output_contract` 被保留。
-6. 所有 annotation/note 的 `quote` 能在源文件中找到，`locator` 归属正确；未找到的标 `pending_human`。
-7. 所有文件哈希、重复、版本链依据真实，无编造数据。
-8. 生成了 `inventory.csv`、`operations.log`、`version_chain.json`、`annotations.json`、`notes.json`、`index.json`；`result.json.artifacts` 列出这些文件。
-9. 若有可编辑 Office/slide/diagram，已生成 PDF/PNG 预览且路径有效；否则在 `errors` 中说明。
-10. `status` 选择诚实：全部完成 `ok`，部分完成 `partial`，材料不足 `insufficient_evidence`，输入错误 `input_error`。
-11. 无 `__pycache__`/`.pyc` 文件；不超过 50 个 UTF-8 文本文件；无 symlink；无预先写好的正式答案。
-12. 命令 `python3 -B scripts/main.py --help` 可退出 0；`python3 -B scripts/main.py --input /input --output /app/output --work /app/work` 在空目录或坏 JSON 下仍 exit 0 且写出合法 partial result.json。
+## 15. 最小调用示例
 
-## 8. 最小调用示例（示例，非正式案例结果）
+示例输入：一个包含若干 PDF、DOCX、TXT 和一份检索问题说明的 `/input` 目录。
 
-```
-python3 -B scripts/main.py --input /input --output /app/output --work /app/work
-# 预期输出：status=ok files=2 annotations=1 notes=1 links=0 dup=0 chains=0
-```
+命令：
 
-## 9. 文件清单与版本
+`python3 -B scripts/main.py run --input /input --output /app/output --work /app/work`
 
-- `SKILL.md` — 本文件，版本 0.2.0。
-- `scripts/main.py` — 基线流水线，负责扫描、重复检测、版本链、批注/笔记/检索、result.json 回填。
-- `scripts/docext.py` — stdlib PDF/DOCX/XLSX/HTML 解析器，被 main.py 导入。
+示意输出（标记为示例，非正式案例结果）：
 
-维护建议：变更检测依赖 sha256；相同输入重复运行应确定。若需新增解析器，更新 `scripts/docext.py`；若需更改 schema 或 output_contract 回填，更新 `scripts/main.py`。保持 stdlib-only，报告解析限制要诚实，不得猜测内容。
+`status=ok files=5 annotations=3 notes=2 links=1 duplicates=1 version_chains=1 search_queries=1 exit=0`
 
-## 10. 关键提醒
+如果 Agent 写入 draft 后再运行：
 
-- 你提交的是 Skill，不是三个案例的答案。
-- 基线脚本给的只是结构化初稿；高分来自你亲自核验和增强之后的可复核证据。
-- 不确定的内容标 `pending_human`，不要为了完整而编造。
-- 最终退出码必须是 0，`result.json` 必须合法存在。
+`python3 -B scripts/main.py run --input /input --output /app/output --work /app/work --draft /app/work/draft.json`
+
+示意输出：
+
+`status=ok agent_verified_annotations=3 agent_added_notes=1 exit=0`
+
+## 16. 与本 Skill 依赖的文件
+
+本包只使用以下相对路径：
+
+- `SKILL.md`
+- `scripts/main.py`
+- `scripts/docext.py`
+
+`scripts/main.py` 是流水线入口，`scripts/docext.py` 提供标准库 PDF/DOCX/XLSX/HTML/TXT 解析能力。所有生成物写入 `/app/output`，所有中间判断写入 `/app/work`。

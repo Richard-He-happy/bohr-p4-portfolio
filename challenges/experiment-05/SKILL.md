@@ -1,165 +1,313 @@
 ---
 name: experiment-result-anomaly-explainer
 description: >-
-  把实测实验数据（仪器 CSV/TSV、重复测量表、多批次/多通道工作表、多 sheet XLSX 工作簿）解释成五段可检查结论：
-  趋势与拐点、异常点绑定到批次/通道、按证据强度与可检验性排序的原因候选、可执行复核清单、下一轮实验方案；
-  并把案例给定的 output_contract 全字段回填进 result.json，同时产出 protocol.md、anomaly_table.csv、
-  recheck_checklist.csv、risk_table.csv。Harness Agent 必须亲自读取材料、推导并撰写/制作成品；
-  脚本只是基线工具和证据计算器，不得把脚本骨架直接当成品。适用于提供了实测读数、曲线、图谱、检测板或设备日志，
-  并问“数据说明什么、哪个点异常、为什么异常、怎么复核、下一步做什么”的案例。
-version: 2.0.0
+  围绕“实验结果解释与异常分析”的 Agent Skill。输入 /input/case.json、task.md 和实际实验材料，
+  输出 /app/output/result.json 及 protocol.md、anomaly_table.csv、recheck_checklist.csv、
+  risk_table.csv 等可复核产物。五段结论：趋势与拐点、异常点定位、可能原因候选、可执行复核步骤、
+  下一轮实验建议。脚本提供确定性基线，Agent 负责真实读材料、核验、撰写并补齐 output_contract。
+version: 3.0.0
 license: MIT
 ---
 
 # experiment-result-anomaly-explainer
 
-把一份实测实验数据解释成五段可检查结论（趋势 / 异常点 / 可能原因 / 复核步骤 / 后续实验建议），并把案例给定的 `output_contract` 全字段回填进 `result.json`。全流程确定性、离线、只用 Python 标准库；但最终成品必须由 Harness Agent 亲自读材料、推导、撰写/制作。
+## 0. 目标与最高优先级
 
-## 0. 最高优先级：Agent 亲自完成，脚本只是工具
+每道案例必须把原始实验数据解释成五段可检查结论：
 
-脚本 `scripts/main.py` 是基线工具，用于快速解析结构化表并生成 initial `result.json`、CSV 和 `protocol.md` 骨架。但最终交付物必须由你（Harness Agent）真实阅读 `/input` 下的原始材料，用模型推导、撰写/制作，不得把脚本输出或模板直接当成品。
+1. **趋势与拐点**：从读数/曲线中给出走势、拐点、平台期、偏离幅度，说明区间、对照与拟合方式。
+2. **异常点**：按样本/批次/通道/孔位/时间点定位，给出异常程度、阈值、与对照或重复的关系。
+3. **可能原因**：形成按证据强度与可检验性排序的候选清单，标明支持证据、排除证据、相关不等于因果的风险。
+4. **复核步骤**：写成第二个人可直接执行的动作：回查文件/sheet/行/列、核对批次/设备日志、补做对照或重复。
+5. **后续实验建议**：依据原因候选与证据缺口，给出补对照、加密采样点、调整参数范围、扩大重复数等方案。
 
-- 先运行脚本产出**全套基线交付物**，保证契约字段齐全；后续校验与改写只能在基线上增强，不得删除、清空或遗漏任何基线字段。
-- 对关键数值、异常定位、原因候选、复核步骤，必须亲自回指到材料的具体文件、sheet、表、行、列、引文；脚本给出的任何数字都要验证或修正。
-- 最终结果必须体现“genuinely-derived”：在 `result.json` 中给出 `verified`、`pending_human`、`conflicts` 和 `changes[]`，记录 Agent 实际读过什么、改了什么。
-- 先落盘 honest partial，再增量改进；完整交付优先。
+同时回填 `output_contract` 全部字段。禁止用预制答案代替实际运行；禁止把脚本骨架直接当成品；禁止脱离实际文件编造数据或来源。
 
-## 1. 何时使用
+---
 
-满足任一条件即可加载：
+## 1. 单命令全流程入口
 
-- 输入含**实测读数**：仪器导出 CSV/TSV、重复测量表、多批次/多通道工作表、XLSX 多 sheet、设备日志；
-- 用户问「这批数据说明了什么」「哪个点异常」「为什么异常」「怎么复核」「下一步做什么实验」；
-- 案例带有 `output_contract`（需逐字段回填）或 `case_id`（需原样保留）。
-
-不适用：只有实验设计需求、没有数据的「方案生成」题；纯文献综述；纯统计建模。
-
-## 2. 调用方式与目录约定
+首次优先执行：
 
 ```bash
-python3 scripts/main.py --input <输入目录> --output <输出目录>
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
 ```
 
-- 输入默认 `/input`，输出默认 `/app/output`；工作目录 `/app/work`（脚本会自动创建）。
-- 也接受 `--input/--output`、`$INPUT_DIR/$OUTPUT_DIR`、`/bohr-workspace/input|output`、或 CWD 下的 `input/`。
-- 脚本用 `Path(__file__).resolve().parent` 定位同目录 `analysis.py`，**与当前工作目录无关**。
-- `--help` 打印用法，`--version` 打印版本。
-- **退出码恒为 0**：异常只写入 `errors`/`degradations`/`pending_human`，不中断运行。
-- 启动即写合法 partial `result.json`（`status: partial`），分析完成后无条件覆盖为 finalize 版本。
-- Agent 可以多次运行脚本，但最终产物必须位于 `/app/output`，不得把 `/app/work` 中间文件当最终交付。
+该命令内部完成：
 
-## 3. 专属执行流程（编号步骤）
+- `init`：盘点 `/input` 材料、分配来源编号 `S#`、抽取候选数值与冲突分组。
+- `build`：校验抽取、写入/渲染全部产物、finalize `result.json`。
+- `selfcheck`：按 output_contract 检查产物与字段是否齐全。
 
-### 步骤 1：盘点输入与契约
+退出码必须恒为 `0`。任何异常写入 `errors`/`degradations`/`pending_human`，不中断。启动后先写合法 partial `result.json`，再逐步覆盖为 finalize；时间或请求不足时保留 partial。
 
-输入：`/input/case.json`、`/input/task.md`、题面规定的全部材料文件。
+如果当前安装的 `main.py` 不接受 `run` 子命令，则使用等价单命令：
 
-动作：
+```bash
+python3 scripts/main.py --input /input --output /app/output --work /app/work
+```
 
-- 读取 `case.json` 与 `task.md`，提取 `case_id`、`topic`、`domain`、`goal`、`equipment`、`reagents`、`time/budget/personnel`、`output_contract`。
-- 列出 `/input` 下所有材料文件及其类型（PDF/DOCX/CSV/XLSX/图片等），**不要跳过任何类型**。
-- 建立 `output_contract` 字段清单，键名原样保留，作为最终回填依据。
+不要散乱调用零散脚本。`scripts/analysis.py` 只作为诊断和复核工具，不作为交付入口。
 
-输出：材料文件清单、契约字段清单、基础元数据。
+---
 
-失败分支：
+## 2. Agent-first 双路径
 
-- `case.json` 缺失或损坏：先扫描同级 `case*.json`；仍失败则继续分析材料，`case_id` 记 `UNKNOWN`，`status` 记 `partial` 或 `insufficient_evidence`，错误写入 `errors`。
-- 材料清单为空：直接进入降级流程（第 9 节），仍产出合法 `result.json`，退出码 0。
+### 路径 A：Agent 增量高质量路径
 
-### 步骤 2：真实解析所有可读材料
+1. 先运行一次 E2E 基线命令，得到完整候选产物。
+2. 读 `/app/work/inventory.json`、候选抽取结果和 `/input` 全部原始材料。
+3. 将判断写入 `/app/work/draft.json`。
+4. 再次运行 E2E 命令；主脚本检测到 `draft.json` 后，将 Agent 判断合并进正式产物。
+5. 进行 selfcheck，补齐 `agent_review.json` 与 honest gaps。
 
-输入：步骤 1 清单。
+`draft.json` 至少应包含：
 
-动作：
+```json
+{
+  "case_id": "从 /input/case.json 原样读取",
+  "trend": [{"claim": "方向/拐点/幅度", "source_id": "S#", "locator": "文件#页/行/列", "quote": "逐字引用", "confidence": "high|medium|low"}],
+  "anomalies": [{"index": "样本/批次/通道/时间点", "score": "偏离度量", "threshold": "判定阈值", "source_id": "S#", "locator": "..."}],
+  "causes": [{"hypothesis": "...", "strength": "direct|indirect|exclusion_only", "support": ["S#..."], "against": ["S#..."], "testable": true}],
+  "recheck": [{"action": "可执行动作", "file_target": "文件/字段", "expected_if_true": "...", "expected_if_false": "..."}],
+  "next_experiment": [{"change": "补对照/扩大重复/加密采样/调参", "gap_addressed": "...", "rationale": "..."}],
+  "uncertainty": [],
+  "pending_human": []
+}
+```
 
-- 对结构化表格（CSV/TSV/XLSX/XLSM）先运行主脚本，或直接调用 `analysis.py` 解析，提取数值行列。
-- 对 PDF：调用环境可用文本提取工具（如 `pdf-text-tool` / `pdftotext` / 等效工具）读取全文；若 PDF 包含表格，提取文本后你亲自识别行列。**不得依据文件名或领域标签猜测内容**。
-- 对 DOCX：用环境可用工具读取段落和表格。
-- 对图片：若环境有 OCR 能力或题目要求曲线读数，用工具提取；否则明确标注 `not-read` 和 `pending_human`。
-- 把解析结果写入 `/app/work/parsed_material.md`（证据页），附来源路径、页码、表名、行/列位置、逐字引用。
+### 路径 B：无 draft 的确定性兜底
 
-输出：`/app/work/parsed_material.md`、结构化表数据、PDF/DOCX 文本、图片描述、每个材料的来源定位。
+如果 Agent 没有写入 `draft.json`，或只能完成部分 draft，主脚本必须从 init 台账确定性抽取生成实质工作稿：逐字 quote、locator、source_id、可复核数值。此路径允许诚实记录 `AUTO_EXTRACT` 到 `degradations` 和 `gaps`。
 
-失败分支：
+两条路径必须产出同一套产物结构和同一份 `result.json` 契约。不允许因为走兜底就删除字段或换格式。
 
-- 单个文件解析失败：该文件在 `sources[].parsed = error`，其余文件继续。
-- 关键材料（例如唯一实验数据）无法解析：`status` 降级为 `insufficient_evidence`，仍产出基线，并用 `pending_human` 说明缺什么。
+---
 
-### 步骤 3：构建与核对证据
+## 3. 输入与输出目录
 
-输入：解析证据 + 脚本计算的趋势/异常候选。
+- 输入：`/input/case.json`、`/input/task.md`、题面规定的材料与 artifacts。
+- 工作：`/app/work`。
+- 最终输出：`/app/output`。
 
-动作：
+最终输出至少包含：
 
-- 用 `analysis.py` 读取结构化表，计算趋势指标（斜率、R²、拐点）、稳健 z、异常候选。
-- 对脚本输出逐项核对：找到对应原始数据行/列，确认数值一致；检查单位、重复数、对照设置。
-- 对 PDF/DOCX 中的方法、仪器参数、批次、阈值，提取为 `protocol.basis` 证据，并记录 `locator`/`quote`。
-- 标记数据质量问题：重复不足、缺对照、读数封顶、单位不一致、结论冲突。
+- `result.json`：主结果与 output_contract 双回显。
+- `protocol.md`：假设、变量、对照、步骤、参数、资源、判读标准、风险与确认项。
+- `anomaly_table.csv`：异常点明细，含来源 locator。
+- `recheck_checklist.csv`：第二人可执行复核清单。
+- `risk_table.csv`：依据、风险、异常处置、来源 locator。
+- 如 output_contract 要求 Office/幻灯片/图形，须同时提供可编辑文件和真实渲染的 PDF/PNG 预览。
+- `agent_review.json`：Agent 核验记录；若未执行 Agent 路径，说明自动兜底。
 
-输出：证据核对表写入 `/app/work/evidence_map.md`，记录每项结论的证据路径。
+---
 
-失败分支：
+## 4. 材料盘点与来源编号
 
-- 脚本计算失败或无结构化表：使用你从 PDF/DOCX 中人工提取的数值，手动进行稳健统计或至少描述性统计；仍产出。
-- 证据不足：在 `result.json` 中列 `limitations`，不要把推测当事实。
+必须真实读取实际文件，不得依据文件名或领域标签猜测内容。
 
-### 步骤 4：Agent 产出/增强完整成品
+1. 读 `case.json` 与 `task.md`，提取 `case_id`、`topic`、`domain`、`goal`、`equipment`、`reagents`、`time/budget/personnel`、`output_contract`。
+2. 列全 `/input` 下所有材料，按真实类型处理：CSV/TSV/TXT、XLSX/XLSM、PDF、DOCX、图片/图谱。
+3. 每个来源分配 `S#`，稳定编号，供引用与回指。
+4. `case.json` 缺失或损坏时，先查同级 `case*.json`；仍失败则继续用材料，`case_id` 记 `UNKNOWN`，`status` 记 `partial` 或 `insufficient_evidence`。
+5. 无任何可读材料时，仍产出合法 `result.json`，状态 `insufficient_evidence`，不是 failure。
 
-输入：核对后的证据、契约字段清单。
+结构化表格：由脚本解析，Agent 抽查数值。  
+PDF：调用环境可用的文本提取工具，读全文和表格；PDF 无文本层时如实标 `not-read` 并写 `pending_human`。  
+DOCX：读段落和表格。  
+图片/图谱：有 OCR/曲线读取工具才提取；否则标 `not-read`。
 
-动作：
+---
 
-- 撰写五段主结果：`trend[]`、`anomalies[]`、`causes[]`、`recheck[]`、`next_experiment[]`（字段定义见第 5 节）。
-- 编写 `protocol.md`（假设/变量/对照/步骤/参数/资源/判读标准/风险/确认项），基于真实材料；未给的仪器参数、试剂目录号、限度值一律不填，写 `pending_human`。
-- 生成 `anomaly_table.csv`、`recheck_checklist.csv`、`risk_table.csv`。
-- 回填 `output_contract` 中所有字段，键名不改，层级不改；未知字段保留 `null` 或 `[]`。
-- 若 `output_contract` 要求可编辑 Office/幻灯片/图形产物：制作真实文档，并导出 PDF/PNG 预览到 `/app/output`。
-- 写 `summary`、不确定性、`changes[]`。
+## 5. 证据、locator 与可核验性
 
-输出：`/app/output/result.json` + 所有配套文件（`protocol.md`、CSV、预览如有）。
+每条关键数字、异常定位、原因论断必须能回指到原始材料。
 
-失败分支：
+- locator 示例：
+  - 表格：`[S3] sample_workbook.xlsx#sheet=Sheet1#row=12#col=3#range=D12:D18`
+  - PDF：`[S2] full_paper.pdf#page=4#paragraph=3#line=2`
+  - CSV：`[S1] raw_reads.csv#row=7#col=2`
+- quote 必须逐字引用，不转述。
+- 没有 locator 和 source_id 的断言不得进入正式结论；如暂时无法定位，放入 `uncertainty` 或 `pending_human`。
+- 主观判断须写参考答案、来源定位、可接受范围、不确定性。
 
-- 时间不够或模型请求接近上限：先确保 `result.json` 合法且所有 `output_contract` 字段存在（可为 `null`），再补配套；有 partial 就落盘。
-- 任何一条撰写不了：写 `limitations` 和 `pending_human`，不编造。
+必须记录判定方法与阈值，例如：
 
-### 步骤 5：自检 rubric 与契约完整性
+- 趋势：至少 3 个时间点；5 点以上可用线性/Theil-Sen 斜率；记录 R²、窗口、单位。少于 5 点只能给方向，不给拐点强度。
+- 异常：默认稳健 z 或 MAD，阈值 `median + 3.5 * MAD`；少于 5 次重复不判异常，只标“可观察波动”；封顶/超量程数据单独标记。
+- 原因：按 `direct support` / `indirect support` / `only plausible` / `excluded` 四级排序；必须有排除证据，不把相关写成因果。
+- 对照：有对照时才允许推断处理效应；缺对照只能描述趋势，不推断归因。
 
-输入：`/app/output` 成品。
+---
 
-动作：
+## 6. 五段结论怎么写
 
-- 逐项对照 `output_contract` 字段：`result.json` 中每个键都存在；磁盘文件与字段对应；缺失立即补齐或标 `null`。
-- 按第 11 节自检清单逐项检查完整性和可核验性。
-- 验证关键数字与来源一致；不一致修正结果和源 `locator`。
-- 记录 `changes[]`，注明本次 Agent 修改内容。
+### 6.1 趋势与拐点
 
-输出：最终 `result.json` 状态 `finalize`（或 `partial` 带缺失项），无误。
+- 报告方向、幅度、区间起点/终点、拐点位置、平台期。
+- 说明拟合方式、使用窗口、对照区间。
+- 不允许写“读数升高”却不给数值、区间、单位。
+- 区分信号与噪声：小波动不得称为拐点。
 
-失败分支：
+### 6.2 异常点
 
-- 发现缺项：回到步骤 4 补齐；若模型请求/时间不足，保留 honest partial 并列出缺失项，不伪装完成。
+- 定位维度完整：样本、批次、通道、孔位、时间点。
+- 给异常分数、阈值、与对照/重复的偏离关系。
+- 封顶数据、超量程数据、表观异常但可能与批次绑定者须注明。
+- 哪些不是异常也要给排除说明。
 
-### 步骤 6：回填并最终落盘
+### 6.3 可能原因
 
-输入：步骤 5 结果。
+每条原因候选包括：
 
-动作：
+- 假设。
+- 支持证据 `support`，逐条带 `S#`/locator。
+- 排除证据 `against`。
+- 可检验性：可由哪个复核动作验证。
+- 风险：相关不等于因果、批次混淆、设备漂移、通道串扰等。
 
-- 确保所有文件在 `/app/output`；`result.json` 含 `case_id`、`status`、`summary`、`sources[]`、`uncertainty[]`、`counts`、`runtime`、`changes[]` 和 `output_contract` 全字段。
-- 可清理 `/app/work` 中间文件，但不要影响输出。
-- 退出码 0。
+必须排序，不能只给一个“最可能原因”。
 
-输出：最终交付。
+### 6.4 复核步骤
 
-失败分支：任何异常都 `try/except` 后写合法 `result.json`，退出码 0。
+不能写“检查数据质量”。要写成：
 
-## 4. 输入发现（按语义，不假设固定键名）
+- 打开哪个文件、哪个 sheet、哪个列/行。
+- 重新计算哪个公式。
+- 核对哪个批号/设备日志。
+- 验证如果假设成立应该看到什么；如果不成立应该看到什么。
+- 要补做哪些对照或平行重复。
 
-| 来源 | 处理 |
+### 6.5 后续实验建议
+
+- 对应证据缺口：补对照、增加重复、加密采样点、调整参数范围、分批次标记。
+- 每个建议说明解决哪个不确定性、预期读数和失败判读方式。
+- 不把未经确认的建议写成可执行事实。
+
+---
+
+## 7. result.json 契约
+
+`result.json` 必须同时满足：
+
+1. 所有原 `output_contract` 字段**在顶层出现一次**。
+2. 所有原 `output_contract` 字段**在 `nested output_contract` 中再出现一次**，内容一致。
+3. `case_id` 原样保留。
+4. 必须包含：
+   - `status`：`finalize` / `partial` / `insufficient_evidence`
+   - `summary`
+   - `sources[]`
+   - `uncertainty[]`
+   - `pending_human[]`
+   - `errors[]`
+   - `degradations[]`
+   - `changes[]`
+   - `counts`：趋势条数、异常条数、原因条数、复核条数、后续实验条数、未解释项数。
+   - `runtime`：秒，诚实记录。
+   - `output_contract`：嵌套完整契约。
+5. 不伪造 `golden_standard`、`diff_report` 或自评分数；自检只引用真实执行结果。
+6. 失败、缺失、无法判断必须诚实写入，不得用占位符伪装完成。
+
+---
+
+## 8. 异常与降级处理
+
+| 场景 | 处理 |
 |---|---|
-| `case.json` | 取 `case_id`、`topic`、`domain`、`goal`、`equipment`、`reagents`、`time/budget/personnel`、`output_contract`；键名归一化匹配（大小写/下划线/空格无关），也接受 `outputContract` |
-| `task.md` | 读题面要求、评分维度和 Runtime contract，作为预算与降级的依据 |
-| `*.csv/.tsv/.txt/.dat/.prn` | 按首行计数最多的分隔符切分（`,` `\t` `;` `\|`），无分隔符时按 2+ 空格或制表符切 |
-| `*.xlsx/.xlsm` | 纯标准库解析 sharedStrings + worksheet XML，逐
+| `case.json` 缺失/损坏 | 查同级 `case*.json`；仍缺则 `case_id=UNKNOWN`，继续执行，状态 partial/insufficient_evidence |
+| 材料全部不可读 | 输出合法 result.json，状态 `insufficient_evidence`；`errors` 写详情 |
+| 单个 PDF/DOCX/XLSX 解析失败 | 该来源标 parsed=error；其他继续 |
+| 单位不一致 | 保留原单位；禁止在无换算依据时强行统一 |
+| 重复数不足 | 不判离群点；降级为描述性结论，写入 `pending_human` |
+| 缺对照 | 不推断处理效应；只报告趋势和限制 |
+| 读数超量程/封顶 | 标注可能为饱和/截断；单独处理，不纳入普通趋势斜率 |
+| 结论互相冲突 | 写入 `conflicts` 或 `uncertainty`，不压制 |
+| 脚本异常 | 捕获后写 partial result.json，退出码 0 |
+
+---
+
+## 9. 自检清单
+
+结束前逐项核对：
+
+- [ ] `python3 scripts/main.py run --input /input --output /app/output --work /app/work` 可复跑且退出码 0。
+- [ ] result.json 合法 JSON，含 case_id。
+- [ ] output_contract 字段在顶层和 `output_contract` 嵌套内各出现一次且不缺键。
+- [ ] 五个文本型交付物齐全，文档内容与 result.json 一致。
+- [ ] 每个数字/异常/原因至少一条 `S#` + locator。
+- [ ] 材料缺失、解析失败、数据不足均有诚实 gaps。
+- [ ] 没有把主观/专家确认内容写成事实。
+- [ ] 所有文件大小与数量符合平台限制：≤50 文件、单文件≤500KB、总≤2MB。
+- [ ] 如 output_contract 要求，已提供可编辑 Office 文件和 PDF/PNG 预览。
+- [ ] `status` 不为 finalize 时，明确列出 limits。
+- [ ] `changes[]` 记录 Agent 实际读/改/废内容。
+
+---
+
+## 10. 预算意识与增量收尾
+
+官方预算：64 次模型请求 / 900 秒 / 单响应 16384 tokens。
+
+- 先跑 1 次 E2E 基线，确保全套产物和合法 partial。
+- 剩余请求优先用于：读关键材料、核验 locator、补 draft 正文、修正错误。
+- 达到 40 次模型请求或 600 秒时，立即转向收尾：保证 result.json 合法、status 诚实、所有 output_contract 键存在。
+- 不追求完美长文，先保存 honest partial，再改进。
+- 若 Agent 来不及写 draft，确定性兜底也是完整交付；不要空手等靠模型。
+
+---
+
+## 11. 生态与复用
+
+本包附带的资源均为离线、纯标准库、可复现：
+
+- `references/checklists.md`：五段结论核验清单、异常处理清单、接收/拒绝标准。
+- `references/input-formats.md`：CSV/TSV/XLSX/PDF/DOCX/图片等输入格式发现规则和解析优先级。
+- `references/method-and-thresholds.md`：趋势、稳健 z、MAD、批次/通道异常绑定、原因排序、复核清单生成、阈值默认值和调整原则。
+
+其他要求：
+
+- 纯 Python 标准库，`python3 >= 3.8`，离线。
+- 中英文自适应：输入中文用中文，输入英文用英文。
+- 交付文件不得依赖未说明的个人文件、网络、手工临时操作。
+
+---
+
+## 12. 最小调用示例
+
+输入：
+
+```bash
+python3 scripts/main.py run --input /input --output /app/output --work /app/work
+```
+
+`/input` 内至少包含：
+
+- `case.json`
+- `task.md`
+- 题面提供的实验材料，如 `raw_reads.csv` 或 `sample_workbook.xlsx`、`full_paper.pdf`
+
+示意输出：
+
+```text
+/app/output/result.json
+/app/output/protocol.md
+/app/output/anomaly_table.csv
+/app/output/recheck_checklist.csv
+/app/output/risk_table.csv
+/app/output/agent_review.json
+```
+
+此示例只说明接口，不冒充正式案例结果。实际输出完全由输入材料与 Agent 推理决定。
+
+---
+
+## 13. 禁止事项
+
+1. 禁止手工篡改 `result.json` 结构或直接编辑脚本生成的结构化 JSON。
+2. 禁止依据文件名、领域标签或以往记忆补造材料内容。
+3. 禁止生成自设 `golden_standard`、benchmark 分数或白板对比。
+4. 禁止把主观判断/专家确认内容写成事实。
+5. 禁止在缺对照或重复不足时下因果结论。
+6. 禁止省略顶层或嵌套 output_contract。
+7. 禁止因单个文件错误停止运行；必须退出码 0。
+8. 禁止用示例输出冒充案例真实结果。

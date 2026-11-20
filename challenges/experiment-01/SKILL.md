@@ -1,215 +1,500 @@
 ---
 name: experiment-plan-builder
-description: 让 Harness Agent 从研究目标、真实科学材料、资源/价格/预订契约、有限参数域和版本化候选方案中生成、比较、修订并核验可排期、可计价、可复核的湿实验方案。脚本只生成基线骨架；最终交付物必须由 Agent 亲自解析材料、推导并撰写/制作。
-version: 2.0.0
+description: 从研究目标、真实科学材料、资源/价格/预订契约、有限参数域和版本化候选方案生成、比较、修订并核验可排期、可计价、可复核的湿实验方案；先单命令产出完整基线，再以 Agent 精读和 draft.json 增量增强；所有产物与 result.json 契约双回显；无 draft 时确定性兜底并诚实记为 AUTO_EXTRACT。
+version: 3.0.0
 license: MIT
 ---
 
 # 实验方案生成与优化 Skill（Harness Agent 执行手册）
 
-本 SKILL.md 是给 Harness Agent 使用的执行手册。`scripts/build_plan.py` 与 `scripts/plan_core.py` 只是生成基线骨架和做初步算术的工具；**最终交付物必须由你（Agent）亲自读材料、推导、核验、撰写/制作**。禁止直接把脚本默认输出当作完整成品；禁止依据文件名或领域标签猜测材料内容。必须真实解析材料原文，所有方案内容都要能回指输入中的事实节点或明确标为 `principle` / `missing` / `pending_human`。
+本文件是给 Harness Agent 的操作手册。你不是只调用脚本，也不是把题目复述成通用实验目录。你必须基于 `/input` 中真实材料、资源契约、价格/预订约束、有限参数域和版本化候选方案，产出一份可排期、可计价、可复核、可执行或明确说明缺口的实验方案。所有内容必须能回到输入中的原文或显式规则；无法确认的只能标 `missing`、`uncertainty` 或 `pending_human`，不得编造。
 
 ---
 
-## 1. 运行契约与交付物
+## 0. 最高优先级铁律
 
-### 1.1 输入与输出
-
-- 输入目录：`/input`
-  - `case.json`：任务与资源/价格/预订契约，可能包含候选方案、参数域、预算、时间窗、`output_contract`
-  - `task.md`：题面任务说明、运行时契约、评分要求
-  - 题面规定的材料：PDF / DOCX / CSV / 图片等，必须真实解析
-- 工作目录：`/app/work`
-- 输出目录：`/app/output`
-  - `result.json`（必需）
-  - `protocol.md`（必需，完整可执行方案正文）
-  - `risk_table.csv`（必需，风险与异常处置逐项表）
-
-### 1.2 基线脚本调用
-
-先运行：
-
-`python3 -B scripts/build_plan.py --input /input --output /app/output`
-
-脚本只读 `--input`，只写 `--output`，不联网，退出码恒为 0。它会生成全套基线产物和合法 `result.json` 骨架。可选参数：`--mode auto|generate|revise`（默认 auto）、`--version`。
-
-### 1.3 最终交付物
-
-- `result.json` 必须包含原 `output_contract` 的全部字段（键名不改）与 `case_id`，并包含原输出契约字段表（见第 7 节）。
-- `protocol.md` 必须是人可照做/排期的方案正文，而不是模板占位符。
-- `risk_table.csv` 必须逐项列出失败模式、判据、止损点与替代路径。
-- 可编辑 Office/幻灯片/图形产物若涉及，必须额外生成真实渲染的 PDF/PNG 预览；本 Skill 主产物为 md/csv/json，通常无需预览，但如果 Agent 额外制作了图或幻灯片，必须渲染预览。
+1. **先落盘，后增强**：第一步运行单命令全流程，先产出全套基线，再增量改进。
+2. **真实解析材料**：不允许只凭文件名、领域标签或题面摘要猜内容；必须实际读取文件。
+3. **无依据不写**：不编造仪器型号、量程、试剂目录号、文献、DOI、价格、库存、预算、统计量、批准意见。
+4. **所有关键设计与数字必须可核验**：使用 `[S#]` 来源编号和 `文件#页码/行号/段落号` locator。
+5. **任何情况 exit 0**：即使输入损坏、约束冲突或材料缺失，也要输出 partial result，并在 `errors` / `degradations` 中诚实记录。
+6. **保留基线**：不要删除脚本产出的基线文件；Agent 改进要有 before/after 记录，用作增益证据。
 
 ---
 
-## 2. 本题专属执行流程
+## 1. 运行入口：单命令全流程
 
-按顺序执行。每一步写清输入、动作、输出、失败分支。**任何情况下先落盘 honest partial，再增量改进。**
+### 1.1 第一步总是先运行
 
-### 步骤 0：先落盘脚本基线
+    python3 -B scripts/build_plan.py run --input /input --output /app/output --work /app/work
 
-- 输入：`/input` 目录、`scripts/build_plan.py`
-- 动作：立即运行 `python3 -B scripts/build_plan.py --input /input --output /app/output`。即使不确定输入是否完整，也先让脚本产出全套基线产物。
-- 输出：`/app/output/result.json`、`/app/output/protocol.md`、`/app/output/risk_table.csv` 的基线版本。
-- 失败分支：脚本若报错，仍应写出 `result.json` 骨架；如果 `/app/output` 为空，则手动创建含 `case_id`、`status: partial`、`errors` 的最小合法 `result.json`。退出码仍保持 0。
+该命令应完成：
 
-### 步骤 1：盘点输入
+- `init`：盘点 `/input` 材料，生成来源编号、候选方案抽取、约束与冲突分组；
+- `build`：校验输入、必要时做确定性兜底抽取、渲染所有产物、写 `result.json`；
+- `selfcheck`：检查产物文件与 `result.json` 契约是否一一对应。
 
-- 输入：`/input` 目录
-- 动作：
-  1. 列 `/input` 文件清单。
-  2. 读 `task.md`，提取 Runtime contract、输出要求、评分维度。
-  3. 读 `case.json`，提取 `case_id`、研究目标、设备/试剂/价格/预订契约、参数域、预算、时间窗、候选方案、`output_contract`。
-  4. 识别全部材料文件（PDF/DOCX/CSV/图片等）。注意：不能只记文件名，不能凭扩展名假设内容。
-- 输出：输入清单、识别出的材料列表、契约字段清单。
-- 失败分支：无 `case.json` 或坏 JSON：记录 `input_error`，继续用 `task.md` 和其他材料；产出骨架方案。
+### 1.2 如果 `scripts/build_plan.py` 不存在或 `run` 不可用
 
-### 步骤 2：用工具真实解析材料
+立即改为：
 
-- 输入：步骤 1 识别出的材料文件
-- 动作：
-  1. 优先使用 `environment/resources.yaml` 中列出的解析工具。对 PDF 用 `pdf-text-tool` 或等价工具提取文本、表格；对 DOCX 提取正文；对 CSV 读取真实行；对图片如有 OCR 工具则提取文本。
-  2. 逐个材料提取与本题相关的事实：研究目标、假设、变量、设备型号/量程、试剂规格/单价/库存、价格或预订窗口、参数允许域、候选方案步骤、风险相关说明。
-  3. 为每个材料记录：文件名、sha256 前 16 位、解析工具、关键原文摘录、页码或定位。
-- 输出：材料事实笔记（可放在 `/app/work` 或内存），每条事实带引用。
-- 失败分支：工具不可用或材料损坏/格式不支持，登记 `sources` 与 `parse_failed`，相关事实字段标 `missing` / `pending_human`；**不得猜测内容**。
+    python3 -B scripts/build_plan.py --input /input --output /app/output --work /app/work
 
-### 步骤 3：构建并核对证据
+如果该命令不识别 `--work`，去掉 `--work` 重试一次：
 
-- 输入：材料事实笔记 + `case.json` 内容
-- 动作：
-  1. 将材料中的事实与 `case.json` 中的设备量程、试剂单价、库存、预订可用量、预算、时间窗、参数域交叉核对。
-  2. 重点核对：材料中的参数是否在允许域内；价格与报价单是否一致；预订时间是否足够；候选方案步骤是否与材料一致。
-  3. 每条关键事实生成 `evidence`，格式含 `locator`、`quote`、`source_ref`、`verified`。
-- 输出：证据列表、冲突列表、不确定项列表。
-- 失败分支：事实只有 `case.json` 无材料支撑，可标 `basis_type: input` 并注明；材料与 `case.json` 冲突，保留更保守或更原始的值，在 `uncertainty` 记录 `conflict`，必要时标 `pending_human`。
+    python3 -B scripts/build_plan.py --input /input --output /app/output
 
-### 步骤 4：Agent 亲自产出完整成品
+### 1.3 如果脚本仍然失败
 
-- 输入：步骤 3 的证据和脚本基线
-- 动作：
-  1. 在脚本基线上增强 `result.json`，补齐六类要素：假设与变量、对照组、设备材料、时间成本、参数范围、风险异常。
-  2. 亲自重写/增强 `protocol.md`：明确排期表、步骤、设备与耗材型号/规格、参数范围、判读标准、风险与异常处置。
-  3. 亲自增强 `risk_table.csv`：每行含失败模式、早期信号、缓解、止损点、替代路径、负责人、来源。
-  4. 对每个候选方案做真实算术复核：试剂成本、机时成本、墙钟时间、样本量、预算上限、时间窗。不得直接照抄脚本数字而不理解。
-  5. 修订方案时，不重写全部内容；如脚本已做裁剪/替换/降样本量，验证其规则与证据，并把修改记录写入 `changes`。
-- 输出：增强后的 `result.json`、`protocol.md`、`risk_table.csv`
-- 失败分支：某部分材料不足以确定，写入 `pending_human` 或 `uncertainty`，不编造参数、文献或价格；缺少关键参数不影响产出的，继续产出结构方案并标注缺口。
+不得停住。手动创建最小合法 `/app/output/result.json`：
 
-### 步骤 5：按 rubric 自检
+    {
+      "case_id": "${case_id 或 unknown}",
+      "status": "partial",
+      "errors": ["scripts_failed: ..."],
+      "degradations": ["minimal_manual_result"],
+      "sources": [],
+      "uncertainty": [],
+      "pending_human": [],
+      "output_contract": {}
+    }
 
-- 输入：增强后的交付物
-- 动作：
-  1. 核对 `result.json` 是否包含原 `output_contract` 全部字段与 `case_id`。
-  2. 逐项检查第 6 节 rubric 对照表。
-  3. 运行第 7 节自检清单。
-- 输出：自检结果，写入 `result.json.self_check`
-- 失败分支：缺字段补字段；磁盘文件缺失补文件；如果时间或请求预算不足，将状态定为 `partial`，并逐项列出缺失。
-
-### 步骤 6：回填 result.json 并 finalize
-
-- 输入：自检后的交付物与原始输入
-- 动作：
-  1. 重读输入材料与 `case.json`，逐条复核 evidence 中的 `quote` 是否能复现。
-  2. 将 `verified: true|false` 写回；无法复核的写 `verified: false` 并说明。
-  3. 写 `status`、`runtime`、`version`、`changes`、`self_check`。
-  4. 确认 `result.json`、`protocol.md`、`risk_table.csv` 都在 `/app/output`，且退出码为 0。
-- 输出：最终合法交付物。
-- 失败分支：即使有失败，也必须保留 partial，不得删除，退出码 0。
+然后在剩余预算内继续读取材料并增强 `protocol.md`、`risk_table.csv` 和 `result.json`。退出码保持 0。
 
 ---
 
-## 3. 预算策略（64 次模型请求 / 900 秒 / 单次响应 16384 tokens）
+## 2. 输入、工作区与输出
 
-### 3.1 优先级
+### 2.1 输入
 
-1. 最高优先级：**完整交付**。先确保 `/app/output` 有全套基线产物和合法 `result.json`。
-2. 第二优先级：**实际效果**。补齐假设、变量、对照、设备材料、时间成本、参数范围、风险异常六类要素，使方案可排期、可执行。
-3. 第三优先级：**可核验性**。每条关键设计都有证据定位与原文摘录，参数来源可复核。
-4. 第四优先级：使用增益与创新增益证据写入 `changes` 与 `feasibility`。
-5. 画面美化、重复解析、非必要的文献扩展可以跳过。
+- `/input/case.json`：研究目标、约束、设备/试剂/价格/预订契约、参数域、预算、时间窗、候选方案、`output_contract`。
+- `/input/task.md`：任务说明、Runtime contract、评分要求。
+- `/input` 下的真实材料：PDF、DOCX、CSV、图片等。必须实际解析，PDF 不得假设已有预抽取答案层。
 
-### 3.2 请求次数建议分配
+### 2.2 工作区
 
-- 步骤 0 运行基线脚本：1 次 Bash 工具调用
-- 步骤 1 盘点输入：2-4 次请求
-- 步骤 2 解析材料：每个材料 1-2 次工具调用，通常 3 个材料约 5-8 次请求
-- 步骤 3 证据核对：5-8 次请求
-- 步骤 4 方案增强与文件写入：8-12 次请求
-- 步骤 5 自检：3-5 次请求
-- 步骤 6 finalize：2-4 次请求
+- `/app/work`：台账、来源清单、冲突分组、`draft.json`、基线快照、脚本运行日志。
+- 建议保留 `/app/work/00_baseline`，用于证明 Agent 相对基线的增益。
 
-总计约 26-42 次请求，留足余量。
+### 2.3 输出区
 
-### 3.3 增量落盘规则
+最终交付物位于 `/app/output`，至少包含：
 
-- 每完成一个大步骤，立即写回 `/app/output/result.json` 和 `protocol.md` / `risk_table.csv`，不要等全部完成。
-- 如果已经使用 50 次以上请求，或剩余时间不足 300 秒，停掉所有非必要增强，只做 finalize。
-- 不要重复读取大文件。先读脚本生成的关键行，再回查材料定位；不要用多次请求反复读同一整篇 PDF。
+- `/app/output/result.json`：机器可读结果与契约双回显；
+- `/app/output/protocol.md`：完整可执行方案正文；
+- `/app/output/risk_table.csv`：风险与异常处置逐项表；
+- 其他脚本生成的证据表、候选方案比较表等不得删除。
 
 ---
 
-## 4. 隐藏案例鲁棒性
+## 3. 双路径工作流：Agent 路径与确定性兜底
 
-| 情况 | 处置 |
+### 3.1 初始化和台账
+
+第一步运行脚本后，先查看 `/app/work` 下是否有：
+
+- `ledger.json`：来源清单、材料编号、候选方案清单、冲突分组；
+- `source_index.json`：每个材料的 `source_id`、文件名、哈希前 16 位、解析状态；
+- `00_baseline/`：脚本产出基线。
+
+如果没有台账，但输入可读，则自己建立一份简洁台账，写清：
+
+- 每个输入文件的 `source_id`；
+- 材料类型与解析工具；
+- 与本题相关的关键事实、原文摘录、定位；
+- 候选方案编号和主要差异。
+
+### 3.2 Agent 路径：先读原文，再写 draft.json
+
+如果预算允许，走 Agent 路径：
+
+1. 读 `task.md`，提取 Runtime contract、输出要求、六类要素要求；
+2. 读 `case.json`，提取 `case_id`、研究目标、资源契约、价格/预订约束、参数域、候选方案、`output_contract`；
+3. 实际解析每个材料，提取与假设、变量、对照、设备材料、时间成本、参数范围、风险异常相关的事实；
+4. 将你的判断写入 `/app/work/draft.json`，至少包含：
+
+       {
+         "case_id": "来自输入",
+         "research_question": "可检验问题",
+         "hypotheses": [],
+         "variables": [],
+         "groups": [],
+         "equipment_materials": [],
+         "steps": [],
+         "parameters": [],
+         "schedule_costs": [],
+         "risks": [],
+         "readouts": [],
+         "evidence": [],
+         "uncertainty": [],
+         "pending_human": [],
+         "changes": []
+       }
+
+5. 写完后运行校验与构建：
+
+       python3 -B scripts/build_plan.py check --work /app/work --input /input --output /app/output
+
+   或回退：
+
+       python3 -B scripts/build_plan.py --input /input --output /app/output --work /app/work
+
+6. 根据 check 输出补齐文件与字段，再进入自检。
+
+### 3.3 无 draft 时的确定性兜底
+
+如果 Agent 没有写 `/app/work/draft.json`，`build` 必须依据 init 台账做确定性抽取，生成实质工作稿，而不是空模板：
+
+- 逐字引用 `quote`；
+- 给出 `locator`；
+- 从输入中可确定地抽取设备型号、试剂规格、价格、时间窗、参数域、候选方案步骤；
+- 对每个候选方案做算术校验；
+- 在 `result.json` 的 `gaps` 或 `degradations` 中显式记入 `AUTO_EXTRACT`，例如：
+
+      "degradations": [
+        {
+          "code": "AUTO_EXTRACT",
+          "meaning": "未使用 Agent draft.json，方案由确定性脚本从台账抽取生成",
+          "action": "建议人工/Agent 复核原文后再执行"
+        }
+      ]
+
+`AUTO_EXTRACT` 不是失败，而是诚实的降级标记。
+
+---
+
+## 4. 必须解析与记录的事实
+
+对每个输入材料，至少记录：
+
+- 文件名；
+- sha256 前 16 位；
+- 解析工具；
+- 关键原文摘录 `quote`；
+- 定位 `locator`；
+- 与六类要素的对应关系。
+
+重点事实包括：
+
+- 设备型号、量程、精度；
+- 试剂名称、规格、目录号、单价、库存；
+- 预订窗口、可用机时、可预约数量；
+- 参数允许值域和单位；
+- 预算上限、时间窗、样本量约束；
+- 候选方案的步骤、耗时、资源占用、风险点；
+- 材料中已有的风险或异常处理信息。
+
+---
+
+## 5. 实验方案六类要素：必须产出且可核验
+
+无论最终结构如何，`protocol.md` 和 `result.json` 必须覆盖以下六类要素，且每项尽量带证据。
+
+### 5.1 假设与变量
+
+- 把研究目标转成可检验问题；
+- 写出原假设、备择假设或零假设；
+- 明确自变量、因变量、混杂变量；
+- 每个变量有操作定义、测量方式、单位、取值范围；
+- 给出可反证条件或判读标准。
+
+### 5.2 对照组
+
+至少考虑：
+
+- 空白对照；
+- 阴性对照；
+- 阳性对照；
+- 剂量梯度或条件梯度对照。
+
+每个对照写明排除哪一类混杂，不能只有“空白组”或“未处理组”。
+
+### 5.3 设备材料
+
+- 步骤绑定具体设备型号、量程、耗材规格、试剂信息；
+- 标注可替代项和不可替代项；
+- 价格与库存须与输入契约一致；
+- 若输入只有部分信息，缺失项写 `missing`，不得用模糊常见型号补齐。
+
+### 5.4 时间成本
+
+- 步骤时长；
+- 并行关系；
+- 样本量与分组数；
+- 试剂/耗材成本小计；
+- 机时费；
+- 总预算；
+- 墙钟时间；
+- 排期表。
+
+### 5.5 参数范围
+
+- 关键参数、单位、允许区间；
+- 超出区间的处置；
+- 参数依据来自设备手册、预实验还是文献/材料；
+- 若输入允许裁剪，裁剪到最近允许值并记录 `changes`；若没有规则，标 `pending_human`。
+
+### 5.6 风险与异常
+
+每个风险至少包含：
+
+- 失败模式；
+- 早期信号；
+- 缓解措施；
+- 止损点；
+- 替代路径；
+- 负责人/角色；
+- 来源。
+
+常见风险包括：污染、无信号、重复性差、样本不足、试剂缺货、设备排期已满、参数超量程、时间窗冲突。
+
+---
+
+## 6. result.json 契约与双回显
+
+### 6.1 顶层字段
+
+`result.json` 顶层应包含：
+
+- `case_id`
+- `status`
+- `schema_version`
+- `runtime`
+- `version`
+- `changes`
+- `sources`
+- `uncertainty`
+- `pending_human`
+- `errors`
+- `degradations`
+- `self_check`
+- `coverage`
+- 以及原 `output_contract` 中的全部字段。
+
+### 6.2 嵌套 output_contract 双回显
+
+原 `output_contract` 的全部字段，包括 `case_id`，必须在两个地方各出现一次：
+
+1. `result.json` 顶层；
+2. `result.json` 的 `output_contract` 对象中。
+
+两层值必须一致。若原合同有嵌套结构，保留原键名，不得改名，不得只写摘要。
+
+### 6.3 status 取值
+
+- `ok`：六类要素齐备，无阻塞问题，主要事实可回源；
+- `partial`：有缺口、冲突未解决、部分材料缺失或存在降级；
+- `input_error`：输入不可用或无有效任务。
+
+只要不是完全无阻塞，优先使用 `partial`，不要勉强标 `ok`。
+
+### 6.4 输出字段与磁盘文件对应
+
+对于 `output_contract` 中要求的每个字段，必须有对应磁盘文件或结果字段。例如：
+
+- 实验方案正文：`protocol.md`；
+- 风险表：`risk_table.csv`；
+- 证据表：`evidence_table.json` 或 `evidence` 字段；
+- 候选方案比较：`candidate_comparison.md` 或 `result.json` 中 `comparison` 字段。
+
+结束前逐项核对“契约字段 × 磁盘文件 × result.json 键”三者一致。
+
+---
+
+## 7. 必须执行的算术与约束校验
+
+对每个候选方案和最终方案，都要做真实算术校验：
+
+- 材料成本 = Σ(单价 × 数量)
+- 合计样本数 = 组数 × 每组重复数
+- 机时成本 = 机时费 × 使用时长
+- 机时需求 ≤ 可用机时
+- 预订日期 ≤ 时间窗
+- 参数值 ∈ 输入允许域
+- 总成本 ≤ 预算上限
+
+若出现时间窗与样本量冲突、试剂缺货、设备排期已满、参数超量程：
+
+- 在 `feasibility` 中给出硬约束数值；
+- 将不可行项标为 `not_feasible`；
+- 不通过编造或硬压缩重复数“解决”冲突；
+- 写 `pending_human`，说明需要人确认的替换或放宽项。
+
+对三个版本候选方案，若输入中提供：
+
+- 横向比较总成本、墙钟时间、样本量、预订可行性、风险可接受性；
+- 选择或推荐时写明依据和证据；
+- 不自行杜撰输入没有的候选方案。
+
+---
+
+## 8. 产出文件规范
+
+### 8.1 protocol.md
+
+- 面向实验人员，可据此排期、报价、评审；
+- 包含标题、研究目标、假设、变量、对照、设备材料、步骤、参数、排期表、预算、判读标准、风险简述；
+- 每个关键数字/规则带 `[S#]` 和 locator；
+- 不得含未替换的 `{{...}}` 占位符；
+- 不得复制脚本模板而不填入真实内容。
+
+### 8.2 risk_table.csv
+
+列名建议为：
+
+    risk_id, code, failure_mode, likelihood, impact, early_signal, mitigation, stop_condition, fallback, owner, source_ref
+
+每行对应一个明确风险；不得只写“注意安全”。
+
+### 8.3 evidence_table.json 或 evidence 字段
+
+每条证据包含：
+
+    evidence_id, claim_id, source_ref, locator, quote, verified, basis_type, support_scope
+
+`basis_type` 可取值：
+
+- `source`：来自材料原文；
+- `input`：来自 `case.json` 或 `task.md`；
+- `rule`：来自输入明确规则；
+- `principle`：一般科研原则；
+- `missing`：缺失；
+- `pending_human`：需专家确认。
+
+---
+
+## 9. 不确定性与 pending_human 的使用
+
+- `uncertainty`：当前材料不完整、有冲突或只能给出范围，但不阻塞交付。写清问题、影响范围、可能解决路径。
+- `pending_human`：只有真正需要人确认才能继续执行的事项才写入，例如缺少关键设备量程、试剂缺货且不可替代、安全/伦理边界需要批准。
+- 不得把未经确认的建议写成“可执行事实”，不得写“经专家确认”“已通过安全审批”等未发生声明。
+
+---
+
+## 10. 预算策略：64 次模型请求 / 900 秒 / 16384 tokens
+
+### 10.1 请求优先级
+
+1. 先跑单命令，拿到完整基线；
+2. 补齐六类要素和 `protocol.md`；
+3. 补证据表和 `risk_table.csv`；
+4. 做算术校验与契约自检；
+5. 增益记录与美化最后做。
+
+### 10.2 建议分配
+
+- 初始化与脚本运行：1-3 次；
+- 读取 task/case 契约：2-4 次；
+- 解析材料：每个材料 1-2 次，通常 3 个材料 5-8 次；
+- 写 draft 或增强方案：8-14 次；
+- 证据核对：5-8 次；
+- 自检与 finalize：3-6 次。
+
+总计约 25-45 次，留足余量。
+
+### 10.3 预算保护规则
+
+- 每完成一个大步骤，立即写回 `/app/output`，不要等全部完成；
+- 超过 50 次请求或剩余时间不足 300 秒，停止所有非必要增强，只做 finalize；
+- 不要重复读取同一大文件；
+- 如果无法完成精细增强，保留诚实 partial，不要提交空文件或非法 JSON。
+
+---
+
+## 11. 隐藏案例鲁棒性
+
+| 情况 | 正确处置 |
 |---|---|
-| 空输入 / 无 `case.json` | 运行脚本若失败则手动创建 `status: input_error` 骨架；`errors` 记录原因；退出 0 |
-| 材料缺失 | 只依据 `case.json` 中明确字段；相关参数标 `missing` 或 `pending_human`，不猜 |
-| 材料损坏 / 无法打开 | 登记 `sources` 与 `parse_failed`，不猜测内容；如果关键参数受影响，在 `uncertainty` 说明 |
-| 格式不支持 | 尝试 environment/resources.yaml 中的可用工具；无法解析则记录工具缺失与现象 |
-| 超时风险 | 先用脚本快速落盘；解析每个材料限时约 30 秒，超时则记 `parse_failed` 并继续 |
-| `output_contract` 缺失 | 使用本文件第 7 节列出通用字段清单，并在 `self_check.contract_missing` 标注 |
-| 约束冲突（时间窗与样本量冲突、试剂缺货、设备排期已满） | 不通过编造或硬压缩重复数“解决”冲突；在 `feasibility` 硬约束行给出数值，标 `not_feasible`，写 `pending_human` |
-| 参数超量程或不在允许域 | 若输入给出规则或允许域，裁剪到最近允许值并记 `changes`；否则保留硬约束，标 `pending_human` |
-| 任何其他异常 | 最终仍须产出合法 `result.json`，退出码 0，并在 `errors` / `degradations` 如实记录 |
-
-**绝对禁止**：把材料标签当作已读内容；编造仪器量程、试剂目录号、文献、DOI、价格、统计量；在证据不足时写“经专家确认”“实际安全批准”等未发生声明。
+| 空输入 / 无 `case.json` | 继续读 `task.md` 和其他材料；无有效输入则 `status=input_error`，退出 0 |
+| 材料缺失 | 只依据 `case.json` / `task.md` 明确字段；缺失参数写 `missing` 或 `pending_human` |
+| 材料损坏 / 无法打开 | 记录 `sources` 和 `parse_failed`，相关事实写缺口，不猜内容 |
+| 格式不支持 | 尝试 `environment/resources.yaml` 中可用工具；失败则记录工具缺失，不强行解析 |
+| 约束冲突 | 在 `feasibility` 给硬约束数值，标 `not_feasible`，写 `pending_human` |
+| 参数超量程 | 输入有规则则裁剪并记 `changes`；无规则则标 `pending_human` |
+| `output_contract` 缺失 | 使用本文件第 12 节默认字段清单，并写 `self_check.contract_missing=true` |
+| 预算/时间快耗尽 | 立即写 partial result，保证 `result.json` 合法且退出 0 |
+| 中英文输入 | 结果语言自适应；关键字段可中英并列，但不得改变契约键名 |
 
 ---
 
-## 5. rubric 维度 → 交付要求 → 自证方式对照表
+## 12. 若 output_contract 缺失的默认字段
 
-| 评分维度 | 分值 | 交付要求 | 自证方式 |
-|---|---|---|---|
-| 任务完成度 | 15 | 方案确实从研究目标落成可排期、可执行的实验流程，不是复述目标 | `protocol.md` 排期表 + `steps` + `schedule`；每步有动作、设备/试剂、时长、关键参数 |
-| 结果正确性 | 15 | 假设可检验；变量有操作定义与测量方式；对照组能排除混杂；参数在设备与试剂允许范围内 | `hypotheses` 含零假设/判据/反证条件；`variables` 有操作定义；`groups` 含空白/阴性/阳性并写明排除的混杂；`evidence` 中有材料原文 quote |
-| 结果完整性 | 5 | 六类要素齐全：假设变量、对照、设备材料、时间成本、参数范围、风险异常 | `coverage.elements` 六项布尔为 true，或明确标 partial |
-| 结果可核验性 | 5 | 方案版本、参数来源、金标准、运行记录可复核 | `evidence` 的 locator + quote + verified；`sources` 哈希；`changes` 版本链；`runtime`；`validation.gold_standard` |
-| 使用增益-质量 | 15 | 同样输入下比基础 Agent 方案更正确、完整、可执行 | 展示脚本基线后 Agent 增强内容；`changes` 中记录裁剪、替代、补对照、降样本量等具体改进 |
-| 使用增益-效率 | 5 | 减少澄清次数、返工轮次 | `pending_human` 只列真正阻塞项；`uncertainty` 给出解决路径；`status` 明确可用性 |
-| 增益可验证性 | 5 | 公平对照证明质量/效率改善 | 保留脚本基线与 Agent 修改记录；不删除原始产物；`changes` 标注 before/after |
-| 创新增益-新增能力 | 5 | 能按设备量程与预算裁剪参数、按目标反推对照、生成风险备用路径 | `changes` 中 clip/substitute/reduce_replicates 规则与证据；`risks.fallback`；`groups` 的四类对照 |
-| 创新增益-方法改进 | 5 | 从目标到假设、变量、对照、参数、资源的生成方法有实质改进 | 说明六类要素如何从材料推出；每个推导写 `basis_type` |
-| 创新增益-创新证据 | 5 | 说明创新点相对现有能力的边界与价值 | `result.json` 的 `summary` 或 `validation` 写清方法改进；不空洞自夸 |
-| 可靠体验-调用易用性 | 3 | Agent 能正确触发，说明输入输出与用法 | 本文件第 1 节与第 2 节 |
-| 可靠体验-运行稳定性 | 4 | 不同实验体系、资源条件下持续可用 | 语义匹配输入键名；标准库运行；隐藏案例分支见第 4 节 |
-| 可靠体验-异常处理 | 3 | 缺失、冲突、依赖不可用等能识别并处置 | `feasibility` 硬约束台账；`pending_human`；`errors` / `degradations` |
-| 生态贡献-文档完整性 | 3 | 输入清单、输出结构、依赖、示例、适用范围、限制齐全 | 本文件；`result.json` 的字段说明 |
-| 生态贡献-资源可复用性 | 4 | 清单、模板、检查表可复用 | `references/catalog.json`、`references/protocol_template.md`、`references/checklists.md` |
-| 生态贡献-分享推广 | 3 | 有案例、清单、实践价值 | `references/checklists.md` 与 `protocol_template.md` 可直接被其他 Agent 使用 |
+如果 `/input/case.json` 中没有 `output_contract`，使用以下通用字段，并在 `self_check` 中标明：
 
----
+    hypotheses
+    variables
+    groups
+    equipment_materials
+    steps
+    parameters
+    readouts
+    schedule_costs
+    risks
+    feasibility
+    evidence
+    confirmation_items
+    sources
+    uncertainty
+    pending_human
+    changes
 
-## 6. 自检清单（提交前逐项检查）
-
-- [ ] `/app/output/result.json` 存在且合法 JSON；包含 `case_id` 与原 `output_contract` 全部字段，缺值用 `null` 或 `[]`
-- [ ] `/app/output/protocol.md` 存在且非空，不是模板占位符，不含未替换的 `{{...}}`
-- [ ] `/app/output/risk_table.csv` 存在且非空，列名为 `risk_id, code, failure_mode, likelihood, impact, early_signal, mitigation, stop_condition, fallback, owner, source_ref`
-- [ ] 六类要素全部覆盖，`coverage.elements` 无 false；若有 false 则 `status=partial` 并列出缺失
-- [ ] 每个关键设计/参数/价格/预算都有 `evidence`，且 `quote` 能在输入材料中复现，`verified` 已更新
-- [ ] `sources` 包含所有输入材料及 sha256 前 16 位，解析失败材料已标 `parse_failed`
-- [ ] 算术自检通过：材料小计之和 = 材料成本；n × 组数 = 合计样本；机时成本 = 用时 × 机时费；机时需用 ≤ 可用
-- [ ] `changes` 版本链完整，裁剪/替换/降样本量有 before/after/rule/evidence
-- [ ] `status` 与实际一致：`ok` 仅当无阻塞、六类要素齐备；否则用 `partial` 或 `input_error`
-- [ ] 不确定项已在 `uncertainty` 列明；阻塞项已在 `pending_human` 列明；没有编造数值、引用、DOI、批准意见
-- [ ] 运行脚本产生的基线产物未被删除或清空；Agent 增强内容已写入 `reviewed_by_agent` 或相应字段
-- [ ] 任何情况下退出码为 0
+这些字段也应同时出现在 `result.json` 顶层和 `output_contract` 对象中。
 
 ---
 
-## 7. 保留的脚本调用、输出契约字段与目录约定
+## 13. rubric 自检清单
 
-### 7.1 脚本调用
+提交前逐项确认：
 
-```bash
-python3 -B scripts/build_plan.py
+- [ ] `/app/output/result.json` 存在且为合法 JSON；顶层与 `output_contract` 均含 `case_id` 和契约字段；
+- [ ] `/app/output/protocol.md` 存在、非空、无未替换占位符、可直接排期；
+- [ ] `/app/output/risk_table.csv` 存在且列名正确；
+- [ ] 六类要素全部覆盖；若有覆盖缺口，`coverage` 中对应项为 false，且 `status=partial`；
+- [ ] 每个关键设计、价格、参数、预算有证据和 locator；
+- [ ] `sources` 包含所有输入材料与前 16 位 sha256；
+- [ ] 算术自检通过：材料小计、样本量、机时成本、预算上限、时间窗；
+- [ ] 候选方案比较和最终选择有依据；
+- [ ] `changes` 完整记录 before/after/rule/evidence；
+- [ ] `uncertainty`、`pending_human`、`errors`、`degradations` 如实填写；
+- [ ] 没有编造设备、试剂、文献、DOI、价格、统计量、批准意见；
+- [ ] 基线与 Agent 增强内容都保留，增益可查；
+- [ ] 任何情况下退出码为 0。
+
+---
+
+## 14. 禁止事项
+
+- 禁止跳过原始材料阅读，只凭文件名或标签写作；
+- 禁止生成“经专家确认”“实际安全批准”等未发生声明；
+- 禁止自造 `golden_standard`、自设评分或加权自评分；
+- 禁止手工篡改结构化 JSON 结构；若脚本有缺陷，写临时脚本重算，不手工覆盖核心键；
+- 禁止删除脚本生成的基线产物；
+- 禁止空模版或仅复述目标；
+- 禁止写出 NaN、Infinity 等非法 JSON；
+- 禁止伪造 GitHub 链接、benchmark 分数或测评结果。
+
+---
+
+## 15. 生态资源使用
+
+包内可用资源：
+
+- `references/protocol_template.md`：用于组织实验方案结构，不是成品；
+- `references/checklists.md`：六类要素、rubric 自检、评审检查表；
+- `references/catalog.json`：可复用清单或锚点示例。
+
+使用这些资源时，只作为结构和检查工具，不得替代对 `/input` 材料的真实解析。
+
+---
+
+## 16. 最终收尾
+
+最后执行：
+
+1. 重读 `result.json` 确认合法 JSON；
+2. 确认 `case_id`、顶层契约、嵌套 output_contract 三方一致；
+3. 确认 `/app/output` 中所有必需文件存在；
+4. 确认 `status` 与实际完成度一致；
+5. 输出最终结果，退出码 0。
+
+如果时间或请求不足，保留 partial，不空转。
